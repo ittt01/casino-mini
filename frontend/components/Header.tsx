@@ -52,7 +52,7 @@ export const Header: React.FC = () => {
               <Link
                 href="/admin/settings"
                 className={`text-sm font-medium transition-colors hover:text-casino-gold flex items-center space-x-1 ${
-                  pathname.startsWith('/admin') ? 'text-casino-gold' : 'text-casino-text-secondary'
+                  pathname?.startsWith('/admin') ? 'text-casino-gold' : 'text-casino-text-secondary'
                 }`}
               >
                 <Settings className="w-4 h-4" />

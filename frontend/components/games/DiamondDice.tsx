@@ -9,15 +9,15 @@ interface GameResult {
   win: boolean;
   winAmount: number;
   outcome: string;
-  dice: number[];
-  sum: number;
+  dice?: number[];
+  sum?: number;
 }
 
 interface DiamondDiceProps {
   balance: number;
   minBet: number;
   maxBet: number;
-  onPlay: (bet: number, prediction?: { type: string; value: number }) => Promise<GameResult>;
+  onPlay: (bet: number, prediction?: { type: string; value: string | number }) => Promise<GameResult>;
   onClose: () => void;
 }
 

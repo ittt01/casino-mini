@@ -47,7 +47,7 @@ export const RouteGuard: React.FC<RouteGuardProps> = ({
     if (requireAuth && !isAuthenticated) {
       // Not authenticated, redirect to login
       const loginUrl = new URL('/login', window.location.origin);
-      loginUrl.searchParams.set('redirect', pathname);
+      loginUrl.searchParams.set('redirect', pathname ?? '/');
       router.replace(loginUrl.toString());
       return;
     }

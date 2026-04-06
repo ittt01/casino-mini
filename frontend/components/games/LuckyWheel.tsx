@@ -9,15 +9,15 @@ interface GameResult {
   win: boolean;
   winAmount: number;
   outcome: string;
-  segment: number;
-  multiplier: number;
+  segment?: number;
+  multiplier?: number;
 }
 
 interface LuckyWheelProps {
   balance: number;
   minBet: number;
   maxBet: number;
-  onPlay: (bet: number) => Promise<GameResult>;
+  onPlay: (bet: number, prediction?: { type: string; value: string | number }) => Promise<GameResult>;
   onClose: () => void;
 }
 
@@ -165,7 +165,7 @@ export const LuckyWheel: React.FC<LuckyWheelProps> = ({
       setTickerAngle(0);
 
       // Highlight winning segment
-      setHighlightedSegment(gameResult.segment);
+      setHighlightedSegment(gameResult.segment ?? null);
 
       // Suspense delay
       playSuspense();

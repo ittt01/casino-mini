@@ -9,15 +9,15 @@ interface GameResult {
   win: boolean;
   winAmount: number;
   outcome: string;
-  winningNumber: number;
-  winningColor: string;
+  winningNumber?: number;
+  winningColor?: string;
 }
 
 interface RoyalRouletteProps {
   balance: number;
   minBet: number;
   maxBet: number;
-  onPlay: (bet: number, prediction?: { type: string; value: string }) => Promise<GameResult>;
+  onPlay: (bet: number, prediction?: { type: string; value: string | number }) => Promise<GameResult>;
   onClose: () => void;
 }
 
@@ -237,7 +237,7 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
 
       // Calculate the target rotation to land on the winning number
       // The wheel needs to rotate to position the winning number at the pointer (top)
-      const targetSlotRotation = getSlotRotation(completeResult.winningNumber);
+      const targetSlotRotation = getSlotRotation(generatedWin.number);
 
       // Calculate new rotation: accumulated + extra spins + offset to winning number
       // We add extra full rotations (5-7 spins) to make it look realistic
@@ -266,7 +266,7 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
       // Highlight the winning slot
-      setHighlightedSlot(completeResult.winningNumber);
+      setHighlightedSlot(generatedWin.number);
 
       // Show result
       setResult(completeResult);
