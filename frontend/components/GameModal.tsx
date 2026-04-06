@@ -1,10 +1,19 @@
 'use client';
 
-import React, { useState } from 'react';
-import { X, RotateCcw, Coins } from 'lucide-react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { X, RotateCcw, Coins, Sparkles, Trophy } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import api from '@/lib/axios';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/contexts/AuthContext';
+import { useGameSounds } from '@/hooks/useGameSounds';
+import {
+  GoldenSlots,
+  RoyalRoulette,
+  DiamondDice,
+  AceBlackjack,
+  LuckyWheel,
+} from './games';
 
 interface Game {
   _id: string;
@@ -25,216 +34,323 @@ interface GameResult {
   win: boolean;
   winAmount: number;
   outcome: string;
-  newBalance: number;
+  // Additional fields per game type
+  reels?: string[];
+  winningNumber?: number;
+  winningColor?: string;
+  dice?: number[];
+  sum?: number;
+  playerCards?: any[];
+  dealerCards?: any[];
+  playerTotal?: number;
+  dealerTotal?: number;
+  segment?: number;
+  multiplier?: number;
 }
+
+// Win celebration component
+const WinCelebration: React.FC<{ amount: number; onComplete: () => void }> = ({
+  amount,
+  onComplete,
+}) => {
+  useEffect(() => {
+    const timer = setTimeout(onComplete, 3000);
+    return () => clearTimeout(timer);
+  }, [onComplete]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none"
+    >
+      {/* Gold flash overlay */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: [0, 0.3, 0] }}
+        transition={{ duration: 0.5 }}
+        className="absolute inset-0 bg-casino-gold"
+      />
+
+      {/* Win text */}
+      <motion.div
+        initial={{ scale: 0, rotate: -10 }}
+        animate={{
+          scale: [0, 1.2, 1],
+          rotate: [0, 5, 0],
+        }}
+        transition={{ duration: 0.6, ease: 'easeOut' }}
+        className="relative"
+      >
+        <div className="text-center">
+          <motion.div
+            animate={{
+              textShadow: [
+                '0 0 20px #D4AF37',
+                '0 0 40px #FFD700',
+                '0 0 60px #D4AF37',
+                '0 0 20px #D4AF37',
+              ],
+            }}
+            transition={{ duration: 1, repeat: Infinity }}
+          >
+            <Trophy className="w-20 h-20 text-casino-gold mx-auto mb-4" />
+          </motion.div>
+
+          <motion.h2
+            className="text-5xl font-casino font-bold text-gold-gradient mb-2"
+            animate={{
+              scale: [1, 1.05, 1],
+            }}
+            transition={{ duration: 0.5, repeat: 2 }}
+          >
+            BIG WIN!
+          </motion.h2>
+
+          <motion.p
+            className="text-3xl font-bold text-white"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            +${amount}
+          </motion.p>
+        </div>
+      </motion.div>
+
+      {/* Confetti particles */}
+      {[...Array(30)].map((_, i) => (
+        <motion.div
+          key={i}
+          className="absolute w-3 h-3 rounded-full"
+          style={{
+            backgroundColor: ['#FFD700', '#D4AF37', '#FFA500', '#FF6B00', '#FFE5B4'][i % 5],
+            left: `${50 + (Math.random() - 0.5) * 60}%`,
+            top: `${50 + (Math.random() - 0.5) * 40}%`,
+          }}
+          initial={{ scale: 0, opacity: 1 }}
+          animate={{
+            scale: [1, 0.5, 0],
+            x: (Math.random() - 0.5) * 400,
+            y: (Math.random() - 0.5) * 400 + 200,
+            rotate: Math.random() * 720,
+          }}
+          transition={{
+            duration: 2 + Math.random(),
+            ease: 'easeOut',
+          }}
+        />
+      ))}
+    </motion.div>
+  );
+};
+
+// Screen shake overlay for losses
+const LoseEffect: React.FC<{ active: boolean }> = ({ active }) => {
+  if (!active) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: [0, 0.2, 0] }}
+      transition={{ duration: 0.5 }}
+      className="absolute inset-0 bg-red-900/30 pointer-events-none z-40"
+    />
+  );
+};
 
 export const GameModal: React.FC<GameModalProps> = ({ game, onClose }) => {
   const { user, updateBalance } = useAuth();
-  const [bet, setBet] = useState(game.minBet);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [result, setResult] = useState<GameResult | null>(null);
+  const [showWinCelebration, setShowWinCelebration] = useState(false);
+  const [winAmount, setWinAmount] = useState(0);
+  const [showLoseEffect, setShowLoseEffect] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
 
-  const handlePlay = async () => {
-    if (!user || bet > user.balance) {
-      toast.error('Insufficient balance');
-      return;
-    }
+  const { playButtonClick, playWin, playLose } = useGameSounds();
 
-    if (bet < game.minBet || bet > game.maxBet) {
-      toast.error(`Bet must be between $${game.minBet} and $${game.maxBet}`);
-      return;
-    }
+  // Game play handler with suspense delay
+  const handlePlay = async (bet: number, prediction?: { type: string; value: string | number }): Promise<GameResult> => {
+    // This is a placeholder - in real implementation, this would be handled by the individual game components
+    // But we keep the API call structure here for consistency
+    const response = await api.post('/games/play', {
+      gameId: game._id,
+      bet: bet,
+      prediction: prediction,
+    });
 
-    setIsPlaying(true);
-    setResult(null);
+    const gameResult = response.data;
 
-    try {
-      const response = await api.post('/games/play', {
-        gameId: game._id,
-        bet: bet,
-      });
+    // Update balance
+    updateBalance(gameResult.newBalance);
 
-      const gameResult = response.data;
-      setResult(gameResult);
-      updateBalance(gameResult.newBalance);
+    return gameResult;
+  };
 
-      if (gameResult.win) {
-        toast.success(`You won $${gameResult.winAmount}!`);
-      } else {
-        toast('Better luck next time!', { icon: '🎰' });
-      }
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Game error');
-    } finally {
-      setIsPlaying(false);
+  // Close handler with sound
+  const handleClose = () => {
+    playButtonClick();
+    onClose();
+  };
+
+  // Handle win/lose effects
+  const handleResult = (result: GameResult) => {
+    if (result.win) {
+      setWinAmount(result.winAmount);
+      setShowWinCelebration(true);
+      playWin(result.winAmount, 0);
+    } else {
+      setShowLoseEffect(true);
+      playLose();
+      setTimeout(() => setShowLoseEffect(false), 500);
     }
   };
 
-  const getGameVisual = () => {
+  // Render specific game component based on game category/slug
+  const renderGameComponent = () => {
+    const gameProps = {
+      balance: user?.balance || 0,
+      minBet: game.minBet,
+      maxBet: game.maxBet,
+      onPlay: handlePlay,
+      onClose: handleClose,
+    };
+
+    switch (game.slug) {
+      case 'slots':
+        return <GoldenSlots {...gameProps} />;
+      case 'roulette':
+        return <RoyalRoulette {...gameProps} />;
+      case 'dice':
+        return <DiamondDice {...gameProps} />;
+      case 'blackjack':
+        return <AceBlackjack {...gameProps} />;
+      case 'wheel':
+        return <LuckyWheel {...gameProps} />;
+      default:
+        // Fallback to generic game UI
+        return (
+          <div className="text-center py-12">
+            <p className="text-casino-text-secondary">Game not implemented yet.</p>
+          </div>
+        );
+    }
+  };
+
+  // Game-specific header gradient
+  const getHeaderGradient = () => {
     switch (game.category) {
       case 'slots':
-        return (
-          <div className="flex justify-center items-center space-x-4 py-8">
-            {['7️⃣', '💎', '🍒'].map((symbol, i) => (
-              <div
-                key={i}
-                className={`w-20 h-24 bg-casino-card rounded-lg border-2 border-casino-gold/30 flex items-center justify-center text-4xl
-                  ${isPlaying ? 'animate-bounce' : ''}`}
-                style={{ animationDelay: `${i * 0.1}s` }}
-              >
-                {symbol}
-              </div>
-            ))}
-          </div>
-        );
-      case 'dice':
-        return (
-          <div className="flex justify-center items-center py-8">
-            <div className={`text-8xl ${isPlaying ? 'dice-rolling' : ''}`}>
-              🎲
-            </div>
-          </div>
-        );
+        return 'from-red-600/20 to-yellow-600/20';
       case 'table':
-        return (
-          <div className="flex justify-center items-center py-8">
-            <div className={`w-32 h-32 rounded-full bg-red-600 border-4 border-casino-gold flex items-center justify-center ${isPlaying ? 'animate-spin-slow' : ''}`}>
-              <div className="w-4 h-4 bg-white rounded-full" />
-            </div>
-          </div>
-        );
+        return 'from-green-600/20 to-emerald-600/20';
+      case 'dice':
+        return 'from-blue-600/20 to-cyan-600/20';
       case 'cards':
-        return (
-          <div className="flex justify-center items-center space-x-2 py-8">
-            <div className="w-16 h-24 bg-white rounded-lg border-2 border-casino-gold flex items-center justify-center text-4xl transform -rotate-6">
-              🂡
-            </div>
-            <div className={`w-16 h-24 bg-casino-card rounded-lg border-2 border-casino-gold/30 flex items-center justify-center text-4xl ${isPlaying ? 'animate-pulse' : ''}`}>
-              🂠
-            </div>
-          </div>
-        );
+        return 'from-purple-600/20 to-pink-600/20';
       default:
-        return null;
+        return 'from-casino-gold/20 to-casino-gold-dark/20';
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-        onClick={onClose}
-      />
+    <>
+      <AnimatePresence>
+        {showWinCelebration && (
+          <WinCelebration
+            amount={winAmount}
+            onComplete={() => setShowWinCelebration(false)}
+          />
+        )}
+      </AnimatePresence>
 
-      {/* Modal */}
-      <div className="relative w-full max-w-lg bg-casino-panel rounded-2xl border border-casino-gold/30 overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-casino-border">
-          <div>
-            <h2 className="text-2xl font-bold text-casino-gold">{game.name}</h2>
-            <p className="text-sm text-casino-text-secondary">{game.description}</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg hover:bg-casino-card text-casino-text-secondary hover:text-casino-gold transition-colors"
-          >
-            <X className="w-6 h-6" />
-          </button>
-        </div>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      >
+        {/* Backdrop with blur */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="absolute inset-0 bg-black/80 backdrop-blur-md"
+          onClick={handleClose}
+        />
 
-        {/* Game Area */}
-        <div className="p-6">
-          {getGameVisual()}
+        {/* Modal Container */}
+        <motion.div
+          ref={modalRef}
+          initial={{ scale: 0.9, opacity: 0, y: 20 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          exit={{ scale: 0.9, opacity: 0, y: 20 }}
+          transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+          className={`relative w-full max-w-lg ${showLoseEffect ? 'shake-screen' : ''}`}
+        >
+          {/* Lose effect overlay */}
+          <LoseEffect active={showLoseEffect} />
 
-          {/* Result Display */}
-          {result && (
-            <div className={`text-center py-4 rounded-lg mb-4 ${
-              result.win ? 'bg-green-500/20 border border-green-500/50' : 'bg-red-500/20 border border-red-500/50'
-            }`}>
-              <p className="text-lg font-bold">
-                {result.win ? (
-                  <span className="text-casino-green">You Won ${result.winAmount}!</span>
-                ) : (
-                  <span className="text-casino-red">You Lost</span>
-                )}
-              </p>
-              <p className="text-sm text-casino-text-secondary mt-1">{result.outcome}</p>
-            </div>
-          )}
+          {/* Main Modal */}
+          <div className="relative bg-gradient-to-b from-casino-panel to-casino-dark rounded-2xl border border-casino-gold/30 overflow-hidden shadow-2xl">
+            {/* Header with gradient */}
+            <div className={`relative bg-gradient-to-r ${getHeaderGradient()} p-6 border-b border-casino-gold/30`}>
+              {/* Decorative pattern */}
+              <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_50%_50%,_#D4AF37_1px,_transparent_1px)] bg-[length:20px_20px]" />
 
-          {/* Bet Controls */}
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm text-casino-text-secondary mb-2">Bet Amount</label>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setBet(Math.max(game.minBet, bet - 10))}
-                  className="p-2 rounded-lg bg-casino-card border border-casino-border hover:border-casino-gold/50 transition-colors"
-                  disabled={isPlaying}
-                >
-                  -
-                </button>
-                <div className="flex-1 relative">
-                  <Coins className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-casino-gold" />
-                  <input
-                    type="number"
-                    value={bet}
-                    onChange={(e) => setBet(Number(e.target.value))}
-                    min={game.minBet}
-                    max={Math.min(game.maxBet, user?.balance || 0)}
-                    disabled={isPlaying}
-                    className="w-full pl-10 pr-4 py-2.5 bg-casino-card border border-casino-border rounded-lg text-center text-white font-semibold"
-                  />
+              <div className="relative flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="w-12 h-12 rounded-xl bg-casino-card/80 border border-casino-gold/30 flex items-center justify-center">
+                    <Sparkles className="w-6 h-6 text-casino-gold" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-casino font-bold text-white">
+                      {game.name}
+                    </h2>
+                    <p className="text-sm text-casino-text-secondary">
+                      {game.description}
+                    </p>
+                  </div>
                 </div>
-                <button
-                  onClick={() => setBet(Math.min(game.maxBet, bet + 10))}
-                  className="p-2 rounded-lg bg-casino-card border border-casino-border hover:border-casino-gold/50 transition-colors"
-                  disabled={isPlaying}
+
+                <motion.button
+                  onClick={handleClose}
+                  whileHover={{ scale: 1.1, rotate: 90 }}
+                  whileTap={{ scale: 0.9 }}
+                  className="p-2 rounded-xl bg-casino-card/50 border border-casino-border text-casino-text-secondary hover:text-casino-gold hover:border-casino-gold/50 transition-colors"
                 >
-                  +
-                </button>
+                  <X className="w-6 h-6" />
+                </motion.button>
               </div>
-              <div className="flex justify-between text-xs text-casino-text-muted mt-1">
-                <span>Min: ${game.minBet}</span>
-                <span>Max: ${game.maxBet}</span>
-              </div>
+
+              {/* Balance display */}
+              {user && (
+                <div className="absolute -bottom-3 left-6">
+                  <div className="flex items-center space-x-2 bg-casino-dark border border-casino-gold/30 px-4 py-1.5 rounded-full">
+                    <Coins className="w-4 h-4 text-casino-gold" />
+                    <span className="text-sm font-bold text-casino-gold">
+                      ${user.balance.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Play Button */}
-            <button
-              onClick={handlePlay}
-              disabled={isPlaying || !user || bet > (user?.balance || 0)}
-              className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
-                isPlaying || !user || bet > (user?.balance || 0)
-                  ? 'bg-casino-card text-casino-text-muted cursor-not-allowed'
-                  : 'bg-gradient-to-r from-casino-gold to-casino-gold-dark text-casino-dark hover:opacity-90 btn-gold'
-              }`}
-            >
-              {isPlaying ? (
-                <span className="flex items-center justify-center space-x-2">
-                  <RotateCcw className="w-5 h-5 spinner" />
-                  <span>Playing...</span>
-                </span>
-              ) : (
-                'Play Now'
-              )}
-            </button>
+            {/* Game Content */}
+            <div className="p-6 pt-8">
+              {renderGameComponent()}
+            </div>
 
-            {!user && (
-              <p className="text-center text-sm text-casino-red">
-                Please sign in to play
-              </p>
-            )}
-
-            {user && bet > user.balance && (
-              <p className="text-center text-sm text-casino-red">
-                Insufficient balance
-              </p>
-            )}
+            {/* Bottom decoration */}
+            <div className="h-1 bg-gradient-to-r from-transparent via-casino-gold/50 to-transparent" />
           </div>
-        </div>
-      </div>
-    </div>
+
+          {/* Outer glow effect */}
+          <div className="absolute -inset-1 bg-gradient-to-r from-casino-gold/20 via-transparent to-casino-gold/20 rounded-2xl blur-xl -z-10" />
+        </motion.div>
+      </motion.div>
+    </>
   );
 };
+
+export default GameModal;
