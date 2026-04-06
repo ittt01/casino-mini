@@ -5,27 +5,27 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Coins, Sparkles, RotateCcw } from 'lucide-react';
 import { useGameSounds } from '@/hooks/useGameSounds';
 
-interface GameResult {
-  win: boolean;
-  winAmount: number;
-  outcome: string;
-  playerCards: Card[];
-  dealerCards: Card[];
-  playerTotal: number;
-  dealerTotal: number;
-}
-
 interface Card {
   suit: 'hearts' | 'diamonds' | 'clubs' | 'spades';
   value: string;
   numericValue: number;
 }
 
+interface GameResult {
+  win: boolean;
+  winAmount: number;
+  outcome: string;
+  playerCards?: Card[];
+  dealerCards?: Card[];
+  playerTotal?: number;
+  dealerTotal?: number;
+}
+
 interface AceBlackjackProps {
   balance: number;
   minBet: number;
   maxBet: number;
-  onPlay: (bet: number, action?: string) => Promise<GameResult>;
+  onPlay: (bet: number, prediction?: { type: string; value: string | number }) => Promise<GameResult>;
   onClose: () => void;
 }
 
@@ -147,8 +147,8 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
       await new Promise((resolve) => setTimeout(resolve, 800));
 
       // Update with actual results
-      setPlayerCards(gameResult.playerCards);
-      setDealerCards(gameResult.dealerCards);
+      setPlayerCards(gameResult.playerCards ?? []);
+      setDealerCards(gameResult.dealerCards ?? []);
 
       // Suspense before result
       playSuspense();

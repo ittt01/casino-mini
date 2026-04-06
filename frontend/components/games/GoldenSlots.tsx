@@ -10,14 +10,14 @@ interface GameResult {
   win: boolean;
   winAmount: number;
   outcome: string;
-  reels: string[];
+  reels?: string[];
 }
 
 interface GoldenSlotsProps {
   balance: number;
   minBet: number;
   maxBet: number;
-  onPlay: (bet: number) => Promise<GameResult>;
+  onPlay: (bet: number, prediction?: { type: string; value: string | number }) => Promise<GameResult>;
   onClose: () => void;
 }
 
