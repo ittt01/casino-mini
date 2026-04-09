@@ -42,7 +42,7 @@ export const GameCard: React.FC<GameCardProps> = ({ game, onClick }) => {
     <div
       onClick={onClick}
       className={`group relative overflow-hidden rounded-xl border bg-gradient-to-br ${gradientClass}
-        p-6 cursor-pointer card-casino hover:border-casino-gold/50`}
+        p-4 sm:p-6 cursor-pointer card-casino hover:border-casino-gold/50`}
     >
       {/* Background Pattern */}
       <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_50%_50%,_#D4AF37_1px,_transparent_1px)] bg-[length:20px_20px]" />

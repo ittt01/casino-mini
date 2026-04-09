@@ -60,9 +60,9 @@ export const WinnersTicker: React.FC = () => {
     <div className="fixed bottom-0 left-0 right-0 z-40 glass border-t border-casino-gold/30">
       <div className="flex items-center">
         {/* Label */}
-        <div className="flex items-center space-x-2 px-6 py-3 bg-casino-gold/10 border-r border-casino-gold/30">
-          <Trophy className="w-5 h-5 text-casino-gold" />
-          <span className="text-casino-gold font-semibold text-sm whitespace-nowrap">
+        <div className="flex items-center space-x-1.5 sm:space-x-2 px-3 sm:px-6 py-2 sm:py-3 bg-casino-gold/10 border-r border-casino-gold/30 shrink-0">
+          <Trophy className="w-4 h-4 sm:w-5 sm:h-5 text-casino-gold" />
+          <span className="hidden sm:inline text-casino-gold font-semibold text-sm whitespace-nowrap">
             Recent Winners
           </span>
           <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
@@ -79,7 +79,7 @@ export const WinnersTicker: React.FC = () => {
               {duplicatedWinners.map((winner, index) => (
                 <div
                   key={index}
-                  className="flex items-center space-x-2 mx-8 text-sm"
+                  className="flex items-center space-x-1.5 sm:space-x-2 mx-4 sm:mx-8 text-xs sm:text-sm"
                 >
                   <span className="text-casino-gold font-medium">
                     {winner.username}

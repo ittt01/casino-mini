@@ -54,18 +54,18 @@ export default function GamesPage() {
     <div className="min-h-screen animated-bg pb-20">
       <Header />
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {/* Page Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">All Games</h1>
-          <p className="text-casino-text-secondary">Browse and play our collection of mini-games</p>
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl font-bold text-white mb-1 sm:mb-2">All Games</h1>
+          <p className="text-casino-text-secondary text-sm sm:text-base">Browse and play our collection of mini-games</p>
         </div>
 
         {/* Category Filters */}
-        <div className="flex flex-wrap gap-3 mb-8">
+        <div className="flex flex-wrap gap-2 sm:gap-3 mb-6 sm:mb-8">
           <button
             onClick={() => setActiveCategory(null)}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+            className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-sm font-medium transition-colors ${
               activeCategory === null
                 ? 'bg-casino-gold text-casino-dark'
                 : 'bg-casino-card text-casino-text-secondary hover:text-white'
@@ -78,7 +78,7 @@ export default function GamesPage() {
             <button
               key={cat.id}
               onClick={() => setActiveCategory(cat.id)}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+              className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-sm font-medium transition-colors ${
                 activeCategory === cat.id
                   ? 'bg-casino-gold text-casino-dark'
                   : `${cat.color} hover:opacity-80`
@@ -91,13 +91,13 @@ export default function GamesPage() {
 
         {/* Games Grid */}
         {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
             {[...Array(4)].map((_, i) => (
               <div key={i} className="h-64 bg-casino-card rounded-xl animate-pulse" />
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
             {filteredGames.map((game) => (
               <GameCard
                 key={game._id}
