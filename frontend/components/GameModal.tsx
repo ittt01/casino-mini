@@ -294,7 +294,7 @@ export const GameModal: React.FC<GameModalProps> = ({ game, onClose }) => {
           {/* Main Modal */}
           <div className="relative bg-gradient-to-b from-casino-panel to-casino-dark rounded-2xl border border-casino-gold/30 overflow-hidden shadow-2xl">
             {/* Header with gradient */}
-            <div className={`relative bg-gradient-to-r ${getHeaderGradient()} p-6 border-b border-casino-gold/30`}>
+            <div className={`relative bg-gradient-to-r ${getHeaderGradient()} p-4 sm:p-6 border-b border-casino-gold/30`}>
               {/* Decorative pattern */}
               <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_50%_50%,_#D4AF37_1px,_transparent_1px)] bg-[length:20px_20px]" />
 
@@ -337,7 +337,7 @@ export const GameModal: React.FC<GameModalProps> = ({ game, onClose }) => {
             </div>
 
             {/* Game Content */}
-            <div className="p-6 pt-8">
+            <div className="p-4 sm:p-6 pt-6 sm:pt-8">
               {renderGameComponent()}
             </div>
 

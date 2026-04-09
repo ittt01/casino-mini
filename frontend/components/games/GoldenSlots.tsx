@@ -217,19 +217,19 @@ export const GoldenSlots: React.FC<GoldenSlotsProps> = ({
       {renderConfetti()}
 
       {/* Game Header */}
-      <div className="text-center mb-6">
-        <h2 className="text-3xl font-casino font-bold text-gold-gradient mb-2">
+      <div className="text-center mb-3 sm:mb-6">
+        <h2 className="text-2xl sm:text-3xl font-casino font-bold text-gold-gradient mb-1 sm:mb-2">
           Golden Slots
         </h2>
-        <p className="text-casino-text-secondary text-sm">
+        <p className="text-casino-text-secondary text-xs sm:text-sm">
           Match three symbols to win big!
         </p>
       </div>
 
       {/* Slot Machine Display */}
-      <div className="relative mb-8">
+      <div className="relative mb-4 sm:mb-8">
         {/* Outer Frame */}
-        <div className="relative bg-gradient-to-b from-casino-card to-casino-dark rounded-2xl p-4 border-2 border-casino-gold/50 shadow-2xl">
+        <div className="relative bg-gradient-to-b from-casino-card to-casino-dark rounded-2xl p-2 sm:p-4 border-2 border-casino-gold/50 shadow-2xl">
           {/* Decorative corners */}
           <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-casino-gold rounded-tl-lg" />
           <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-casino-gold rounded-tr-lg" />
@@ -237,11 +237,11 @@ export const GoldenSlots: React.FC<GoldenSlotsProps> = ({
           <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-casino-gold rounded-br-lg" />
 
           {/* Reels Container */}
-          <div className="flex justify-center space-x-2 bg-black/50 rounded-xl p-4 border border-casino-gold/30">
+          <div className="flex justify-center space-x-2 bg-black/50 rounded-xl p-2 sm:p-4 border border-casino-gold/30">
             {[0, 1, 2].map((reelIndex) => (
               <div
                 key={reelIndex}
-                className="relative w-24 h-32 overflow-hidden rounded-lg border-2 border-casino-gold/40 bg-gradient-to-b from-casino-card to-casino-dark"
+                className="relative w-20 h-28 sm:w-24 sm:h-32 overflow-hidden rounded-lg border-2 border-casino-gold/40 bg-gradient-to-b from-casino-card to-casino-dark"
               >
                 {/* Blur overlay during spin */}
                 {spinningReels[reelIndex] && (
@@ -267,7 +267,7 @@ export const GoldenSlots: React.FC<GoldenSlotsProps> = ({
                       {REEL_STRIP.map((symbol, idx) => (
                         <div
                           key={idx}
-                          className="w-20 h-28 flex items-center justify-center text-5xl"
+                          className="w-16 h-24 sm:w-20 sm:h-28 flex items-center justify-center text-4xl sm:text-5xl"
                         >
                           {symbol.icon}
                         </div>
@@ -276,7 +276,7 @@ export const GoldenSlots: React.FC<GoldenSlotsProps> = ({
                   ) : (
                     // Show actual symbol when stopped
                     <motion.div
-                      className={`w-20 h-28 mx-auto flex items-center justify-center text-6xl ${
+                      className={`w-16 h-24 sm:w-20 sm:h-28 mx-auto flex items-center justify-center text-5xl sm:text-6xl ${
                         showWinEffect ? 'win-glow' : ''
                       }`}
                       initial={{ scale: 0.8, opacity: 0 }}
@@ -314,7 +314,7 @@ export const GoldenSlots: React.FC<GoldenSlotsProps> = ({
             initial={{ opacity: 0, y: 20, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            className={`text-center py-4 px-6 rounded-xl mb-6 border-2 ${
+            className={`text-center py-3 sm:py-4 px-4 sm:px-6 rounded-xl mb-3 sm:mb-6 border-2 ${
               result.win
                 ? 'bg-gradient-to-r from-casino-gold/20 to-casino-gold/10 border-casino-gold glow-gold-strong'
                 : 'bg-red-900/20 border-red-500/50'
@@ -345,25 +345,25 @@ export const GoldenSlots: React.FC<GoldenSlotsProps> = ({
       </AnimatePresence>
 
       {/* Bet Controls */}
-      <div className="space-y-4">
-        <div className="glass-panel rounded-xl p-4">
-          <label className="block text-sm text-casino-text-secondary mb-3 text-center">
+      <div className="space-y-3 sm:space-y-4">
+        <div className="glass-panel rounded-xl p-3 sm:p-4">
+          <label className="block text-xs sm:text-sm text-casino-text-secondary mb-2 sm:mb-3 text-center">
             Bet Amount
           </label>
-          <div className="flex items-center justify-center space-x-4">
+          <div className="flex items-center justify-center space-x-3 sm:space-x-4">
             <motion.button
               onClick={decreaseBet}
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
               disabled={isPlaying || bet <= minBet}
-              className="w-12 h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               -
             </motion.button>
 
-            <div className="flex items-center space-x-2 px-6 py-3 bg-casino-dark rounded-xl border border-casino-gold/30 min-w-[140px] justify-center">
-              <Coins className="w-5 h-5 text-casino-gold" />
-              <span className="text-2xl font-bold text-white">{bet}</span>
+            <div className="flex items-center space-x-2 px-4 sm:px-6 py-2 sm:py-3 bg-casino-dark rounded-xl border border-casino-gold/30 min-w-[110px] sm:min-w-[140px] justify-center">
+              <Coins className="w-4 h-4 sm:w-5 sm:h-5 text-casino-gold" />
+              <span className="text-xl sm:text-2xl font-bold text-white">{bet}</span>
             </div>
 
             <motion.button
@@ -371,13 +371,13 @@ export const GoldenSlots: React.FC<GoldenSlotsProps> = ({
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
               disabled={isPlaying || bet >= maxBet || bet >= balance}
-              className="w-12 h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               +
             </motion.button>
           </div>
 
-          <div className="flex justify-between text-xs text-casino-text-muted mt-3 px-4">
+          <div className="flex justify-between text-xs text-casino-text-muted mt-2 sm:mt-3 px-4">
             <span>Min: {minBet}</span>
             <span>Max: {Math.min(maxBet, balance)}</span>
           </div>
@@ -389,7 +389,7 @@ export const GoldenSlots: React.FC<GoldenSlotsProps> = ({
           disabled={isPlaying || bet > balance}
           whileHover={!isPlaying && bet <= balance ? { scale: 1.02 } : {}}
           whileTap={!isPlaying && bet <= balance ? { scale: 0.98 } : {}}
-          className={`w-full py-5 rounded-xl font-casino font-bold text-xl transition-all relative overflow-hidden ${
+          className={`w-full py-3 sm:py-5 rounded-xl font-casino font-bold text-base sm:text-xl transition-all relative overflow-hidden ${
             isPlaying || bet > balance
               ? 'bg-casino-card text-casino-text-muted cursor-not-allowed'
               : 'bg-gradient-to-r from-casino-gold to-casino-gold-dark text-casino-dark btn-premium'
@@ -397,32 +397,19 @@ export const GoldenSlots: React.FC<GoldenSlotsProps> = ({
         >
           {isPlaying ? (
             <span className="flex items-center justify-center space-x-2">
-              <RotateCcw className="w-6 h-6 spinner" />
+              <RotateCcw className="w-5 h-5 sm:w-6 sm:h-6 spinner" />
               <span>Spinning...</span>
             </span>
           ) : bet > balance ? (
             'Insufficient Balance'
           ) : (
             <span className="flex items-center justify-center space-x-2">
-              <Sparkles className="w-5 h-5" />
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
               <span>SPIN TO WIN</span>
-              <Sparkles className="w-5 h-5" />
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
             </span>
           )}
         </motion.button>
-
-        {/* Symbol Paytable */}
-        <div className="mt-6 pt-4 border-t border-casino-gold/20">
-          <p className="text-xs text-casino-text-muted text-center mb-3">PAYTABLE</p>
-          <div className="grid grid-cols-3 gap-2">
-            {SYMBOLS.slice(0, 3).map((symbol) => (
-              <div key={symbol.id} className="flex items-center justify-center space-x-1 text-xs">
-                <span>{symbol.icon}</span>
-                <span className="text-casino-gold">x3 = {symbol.value}x</span>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
     </div>
   );

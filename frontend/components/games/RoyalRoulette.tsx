@@ -21,7 +21,11 @@ interface RoyalRouletteProps {
   onClose: () => void;
 }
 
+// Slice angle for the 37-number European wheel
+const SLICE_ANGLE = 360 / 37; // ≈ 9.7297°
+
 // Roulette numbers in order with their colors - European Roulette
+// Update this array if your wheel image uses a different physical sequence.
 const ROULETTE_NUMBERS = [
   { number: 0, color: 'green' },
   { number: 32, color: 'red' },
@@ -90,6 +94,10 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
   const [highlightedSlot, setHighlightedSlot] = useState<number | null>(null);
 
   const wheelRef = useRef<HTMLDivElement>(null);
+  // Tracks accumulated wheel angle to avoid stale-closure issues across async spins
+  const currentAngleRef = useRef(0);
+  // Tracks ball's accumulated rotation so it always moves counter-clockwise (never snaps)
+  const currentBallRef = useRef(0);
 
   const {
     playButtonClick,
@@ -110,18 +118,6 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
     playButtonClick();
     setBet((prev) => Math.min(maxBet, prev + 10));
   }, [maxBet, playButtonClick]);
-
-  // Calculate winning slot position
-  // The wheel must rotate to bring the winning number to the pointer (top)
-  // Formula: accumulatedRotation + (360 * extraSpins) - (winningIndex * sliceAngle)
-  const getSlotRotation = (number: number) => {
-    const winningIndex = ROULETTE_NUMBERS.findIndex((n) => n.number === number);
-    const sliceAngle = 360 / ROULETTE_NUMBERS.length; // ~9.73 degrees per slot
-
-    // Return the offset needed to bring this slot to the top
-    // We subtract because we rotate clockwise, and slots are arranged counter-clockwise
-    return -(winningIndex * sliceAngle);
-  };
 
   // Generate a logical winning number based on bet and win status
   const generateWinningNumber = (
@@ -235,21 +231,34 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
         winningColor: generatedWin.color,
       };
 
-      // Calculate the target rotation to land on the winning number
-      // The wheel needs to rotate to position the winning number at the pointer (top)
-      const targetSlotRotation = getSlotRotation(generatedWin.number);
-
-      // Calculate new rotation: accumulated + extra spins + offset to winning number
-      // We add extra full rotations (5-7 spins) to make it look realistic
-      const extraSpins = 5 + Math.floor(Math.random() * 3); // 5 to 7 full rotations
-      const newRotation = accumulatedRotation + (360 * extraSpins) + targetSlotRotation;
-
-      // Ball rotates opposite direction faster (7-10 full rotations)
-      const ballExtraSpins = 7 + Math.floor(Math.random() * 4);
-      const newBallRotation = -(360 * ballExtraSpins) - targetSlotRotation;
-
-      // Update accumulated rotation for next spin (keeps growing, never resets)
+      // --- Wheel rotation (aesthetic only — purely full spins) ----------------
+      // The wheel rotates clockwise for visual effect and always returns to its
+      // natural orientation (0° mod 360°), so numbers stay at fixed positions.
+      const extraSpins = 5 + Math.floor(Math.random() * 3);
+      const newRotation = currentAngleRef.current + extraSpins * 360;
+      currentAngleRef.current = newRotation;
       setAccumulatedRotation(newRotation);
+      // -----------------------------------------------------------------------
+
+      // --- Ball rotation (lands on the winning slot) -------------------------
+      // In the wheel's natural orientation each slot's centre sits at:
+      //   index × SLICE_ANGLE + SLICE_ANGLE/2  (clockwise from 12 o'clock)
+      // The ball counter-rotates and must end at exactly that screen angle.
+      //
+      // Strategy: compute how many degrees counter-clockwise the ball must
+      // travel from its current visual position to reach the target, then add
+      // extra full counter-clockwise spins. This guarantees the ball always
+      // moves in the same direction (never snaps backward).
+      const winningIndex = ROULETTE_NUMBERS.findIndex(n => n.number === generatedWin.number);
+      const targetBallAngle = winningIndex * SLICE_ANGLE + SLICE_ANGLE / 2; // 0–360°
+
+      const currentBallAngle = ((currentBallRef.current % 360) + 360) % 360;
+      // Counter-clockwise delta: how far CCW from currentBallAngle to targetBallAngle
+      const backwardDelta = ((currentBallAngle - targetBallAngle) + 360) % 360;
+      const ballExtraSpins = 7 + Math.floor(Math.random() * 4);
+      const newBallRotation = currentBallRef.current - ballExtraSpins * 360 - backwardDelta;
+      currentBallRef.current = newBallRotation;
+      // -----------------------------------------------------------------------
 
       // Start spinning
       setWheelRotation(newRotation);
@@ -327,18 +336,18 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
       {renderConfetti()}
 
       {/* Game Header */}
-      <div className="text-center mb-6">
-        <h2 className="text-3xl font-casino font-bold text-gold-gradient mb-2">
+      <div className="text-center mb-3 sm:mb-6">
+        <h2 className="text-2xl sm:text-3xl font-casino font-bold text-gold-gradient mb-1 sm:mb-2">
           Royal Roulette
         </h2>
-        <p className="text-casino-text-secondary text-sm">
+        <p className="text-casino-text-secondary text-xs sm:text-sm">
           Place your bet and watch the wheel spin!
         </p>
       </div>
 
       {/* Roulette Wheel */}
-      <div className="relative mb-8 flex justify-center">
-        <div className="relative w-80 h-80">
+      <div className="relative mb-4 sm:mb-8 flex justify-center">
+        <div className="relative w-[280px] h-[280px] sm:w-80 sm:h-80">
           {/* Outer ring */}
           <div className="absolute inset-0 rounded-full border-4 border-casino-gold/50 shadow-2xl glow-gold"
             style={{ background: 'conic-gradient(from 0deg, #1a1a1a, #2a2a2a, #1a1a1a)' }}
@@ -426,20 +435,13 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
             />
           </motion.div>
 
-          {/* Pointer/Indicator */}
-          <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-20">
-            <div className="relative">
-              <div className="w-0 h-0 border-l-[12px] border-r-[12px] border-t-[24px] border-l-transparent border-r-transparent border-t-casino-gold drop-shadow-lg" />
-              <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-casino-gold" />
-            </div>
-          </div>
         </div>
       </div>
 
       {/* Prediction Selection */}
-      <div className="glass-panel rounded-xl p-4 mb-6">
-        <p className="text-sm text-casino-text-secondary text-center mb-3">Bet on:</p>
-        <div className="grid grid-cols-4 gap-2">
+      <div className="glass-panel rounded-xl p-3 sm:p-4 mb-3 sm:mb-6">
+        <p className="text-xs sm:text-sm text-casino-text-secondary text-center mb-2 sm:mb-3">Bet on:</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {PREDICTION_OPTIONS.map((option) => (
             <motion.button
               key={`${option.type}-${option.value}`}
@@ -469,7 +471,7 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
             initial={{ opacity: 0, y: 20, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            className={`text-center py-4 px-6 rounded-xl mb-6 border-2 ${
+            className={`text-center py-3 sm:py-4 px-4 sm:px-6 rounded-xl mb-3 sm:mb-6 border-2 ${
               result.win
                 ? 'bg-gradient-to-r from-casino-gold/20 to-casino-gold/10 border-casino-gold glow-gold-strong'
                 : 'bg-red-900/20 border-red-500/50'
@@ -537,25 +539,25 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
 
       {/* Bet Controls */}
       {!result && (
-        <div className="space-y-4">
-          <div className="glass-panel rounded-xl p-4">
-            <label className="block text-sm text-casino-text-secondary mb-3 text-center">
+        <div className="space-y-3 sm:space-y-4">
+          <div className="glass-panel rounded-xl p-3 sm:p-4">
+            <label className="block text-xs sm:text-sm text-casino-text-secondary mb-2 sm:mb-3 text-center">
               Bet Amount
             </label>
-            <div className="flex items-center justify-center space-x-4">
+            <div className="flex items-center justify-center space-x-3 sm:space-x-4">
               <motion.button
                 onClick={decreaseBet}
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.95 }}
                 disabled={isPlaying || bet <= minBet}
-                className="w-12 h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 -
               </motion.button>
 
-              <div className="flex items-center space-x-2 px-6 py-3 bg-casino-dark rounded-xl border border-casino-gold/30 min-w-[140px] justify-center">
-                <Coins className="w-5 h-5 text-casino-gold" />
-                <span className="text-2xl font-bold text-white">{bet}</span>
+              <div className="flex items-center space-x-2 px-4 sm:px-6 py-2 sm:py-3 bg-casino-dark rounded-xl border border-casino-gold/30 min-w-[110px] sm:min-w-[140px] justify-center">
+                <Coins className="w-4 h-4 sm:w-5 sm:h-5 text-casino-gold" />
+                <span className="text-xl sm:text-2xl font-bold text-white">{bet}</span>
               </div>
 
               <motion.button
@@ -563,13 +565,13 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.95 }}
                 disabled={isPlaying || bet >= maxBet || bet >= balance}
-                className="w-12 h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 +
               </motion.button>
             </div>
 
-            <div className="flex justify-between text-xs text-casino-text-muted mt-3 px-4">
+            <div className="flex justify-between text-xs text-casino-text-muted mt-2 sm:mt-3 px-4">
               <span>Min: {minBet}</span>
               <span>Max: {Math.min(maxBet, balance)}</span>
             </div>
@@ -581,7 +583,7 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
             disabled={isPlaying || bet > balance}
             whileHover={!isPlaying && bet <= balance ? { scale: 1.02 } : {}}
             whileTap={!isPlaying && bet <= balance ? { scale: 0.98 } : {}}
-            className={`w-full py-5 rounded-xl font-casino font-bold text-xl transition-all relative overflow-hidden ${
+            className={`w-full py-3 sm:py-5 rounded-xl font-casino font-bold text-base sm:text-xl transition-all relative overflow-hidden ${
               isPlaying || bet > balance
                 ? 'bg-casino-card text-casino-text-muted cursor-not-allowed'
                 : 'bg-gradient-to-r from-casino-gold to-casino-gold-dark text-casino-dark btn-premium'
@@ -589,16 +591,16 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
           >
             {isPlaying ? (
               <span className="flex items-center justify-center space-x-2">
-                <RotateCcw className="w-6 h-6 spinner" />
+                <RotateCcw className="w-5 h-5 sm:w-6 sm:h-6 spinner" />
                 <span>Spinning...</span>
               </span>
             ) : bet > balance ? (
               'Insufficient Balance'
             ) : (
               <span className="flex items-center justify-center space-x-2">
-                <Sparkles className="w-5 h-5" />
+                <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
                 <span>SPIN THE WHEEL</span>
-                <Sparkles className="w-5 h-5" />
+                <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
               </span>
             )}
           </motion.button>
@@ -606,7 +608,7 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
       )}
 
       {/* Payout Info */}
-      <div className="mt-6 pt-4 border-t border-casino-gold/20">
+      <div className="mt-3 sm:mt-6 pt-2 sm:pt-4 border-t border-casino-gold/20">
         <p className="text-xs text-casino-text-muted text-center">
           Payouts: Red/Black (2x) • Even/Odd (2x) • Single Number (35x)
         </p>

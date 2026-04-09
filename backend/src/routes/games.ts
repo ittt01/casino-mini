@@ -7,6 +7,7 @@ import {
   playGame,
   updateWinRate,
   updateGlobalWinRate,
+  updateAdvancedConfig,
   getRecentWinners,
   seedGames,
 } from '../controllers/gameController';
@@ -37,6 +38,8 @@ router.patch('/admin/win-rate-global', authenticate, requireAdmin, [
   body('winRate').isFloat({ min: 0, max: 100 }).withMessage('Win rate must be between 0 and 100'),
 ], updateGlobalWinRate);
 router.patch('/:gameId/win-rate', authenticate, requireAdmin, updateWinRate);
+// Advanced per-game configuration (wheel segment weights, blackjack house rules, etc.)
+router.patch('/:gameId/advanced-config', authenticate, requireAdmin, updateAdvancedConfig);
 router.post('/seed', authenticate, requireAdmin, seedGames);
 
 export default router;

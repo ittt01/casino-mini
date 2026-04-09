@@ -56,6 +56,7 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
   const [confetti, setConfetti] = useState(false);
   const [showDealerCards, setShowDealerCards] = useState(false);
   const [isBlackjack, setIsBlackjack] = useState(false);
+  const [cardsRevealed, setCardsRevealed] = useState(false);
 
   const {
     playButtonClick,
@@ -87,6 +88,9 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
     setBet((prev) => Math.min(maxBet, prev + 10));
   }, [maxBet, playButtonClick]);
 
+  // Store initial cards for reveal feature
+  const [initialPlayerCards, setInitialPlayerCards] = useState<Card[]>([]);
+
   // Deal cards with animation
   const dealHand = async () => {
     if (isPlaying || bet > balance) return;
@@ -100,6 +104,8 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
     setDealerCards([]);
     setShowDealerCards(false);
     setIsBlackjack(false);
+    setCardsRevealed(false);
+    setInitialPlayerCards([]);
     setDealingCards(true);
 
     // Generate cards
@@ -108,10 +114,13 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
     const pCard2 = generateCard();
     const dCard2 = generateCard();
 
+    // Store initial player cards for later reveal
+    setInitialPlayerCards([pCard1, pCard2]);
+
     // Deal animation sequence
-    // Card 1: Player
+    // Card 1: Player (face down)
     playCardDeal();
-    setPlayerCards([pCard1]);
+    setPlayerCards([{ suit: 'spades', value: '?', numericValue: 0 }]);
     await new Promise((resolve) => setTimeout(resolve, 400));
 
     // Card 2: Dealer (face down initially)
@@ -119,9 +128,12 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
     setDealerCards([dCard1, { suit: 'spades', value: '?', numericValue: 0 }]);
     await new Promise((resolve) => setTimeout(resolve, 400));
 
-    // Card 3: Player
+    // Card 3: Player (face down)
     playCardDeal();
-    setPlayerCards([pCard1, pCard2]);
+    setPlayerCards([
+      { suit: 'spades', value: '?', numericValue: 0 },
+      { suit: 'spades', value: '?', numericValue: 0 },
+    ]);
     await new Promise((resolve) => setTimeout(resolve, 400));
 
     // Card 4: Dealer
@@ -130,12 +142,44 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
     await new Promise((resolve) => setTimeout(resolve, 400));
 
     setDealingCards(false);
+  };
+
+  // Dealer must hit until they have 17 or more
+  const drawDealerCards = async (currentDealerCards: Card[]): Promise<Card[]> => {
+    let dealerHand = [...currentDealerCards];
+    let dealerScore = calculateTotal(dealerHand);
+
+    // Dealer draws until they have at least 17
+    while (dealerScore < 17) {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      const newCard = generateCard();
+      dealerHand = [...dealerHand, newCard];
+      dealerScore = calculateTotal(dealerHand);
+
+      // Update state so player sees the card being drawn
+      setDealerCards(dealerHand);
+      playCardDeal();
+    }
+
+    return dealerHand;
+  };
+
+  // Reveal cards and continue with game
+  const revealCards = async () => {
+    if (initialPlayerCards.length === 0) return;
+
+    // Flip player cards
+    playCardFlip();
+    setCardsRevealed(true);
+    setPlayerCards(initialPlayerCards);
 
     // Check for blackjack (21 on first two cards)
-    const playerTotal = pCard1.numericValue + pCard2.numericValue;
-    if (playerTotal === 21) {
+    const initialPlayerTotal = initialPlayerCards[0].numericValue + initialPlayerCards[1].numericValue;
+    if (initialPlayerTotal === 21) {
       setIsBlackjack(true);
     }
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
 
     // Play game
     try {
@@ -146,26 +190,107 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
       playCardFlip();
       await new Promise((resolve) => setTimeout(resolve, 800));
 
-      // Update with actual results
-      setPlayerCards(gameResult.playerCards ?? []);
-      setDealerCards(gameResult.dealerCards ?? []);
+      // Get the current dealer cards (either from backend or current state)
+      let currentDealerCards = gameResult.dealerCards?.length > 0
+        ? gameResult.dealerCards
+        : dealerCards;
 
-      // Suspense before result
+      // Update player cards from backend if provided
+      let currentPlayerCards = initialPlayerCards;
+      if (gameResult.playerCards && gameResult.playerCards.length > 0) {
+        currentPlayerCards = gameResult.playerCards;
+        setPlayerCards(gameResult.playerCards);
+      }
+
+      // Dealer MUST draw until they have at least 17 (only if frontend controls the game)
+      // Check if dealer already has >= 17 from backend, otherwise draw
+      const currentDealerScore = calculateTotal(currentDealerCards);
+      if (currentDealerScore < 17) {
+        currentDealerCards = await drawDealerCards(currentDealerCards);
+      } else {
+        setDealerCards(currentDealerCards);
+      }
+
+      // Stop dealing state so button doesn't look stuck while player views cards
+      setDealingCards(false);
+
+      // Suspenseful delay before showing result (2.5 seconds for player to see final cards)
       playSuspense();
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, 2500));
 
-      // Show result
-      setResult(gameResult);
+      // Calculate final totals using the actual cards
+      const playerTotal = calculateTotal(currentPlayerCards);
+      const dealerTotal = calculateTotal(currentDealerCards);
 
-      if (gameResult.win) {
+      // Check for blackjack (21 on first two cards only)
+      const isBlackjackWin = currentPlayerCards.length === 2 && playerTotal === 21;
+
+      let isWin = false;
+      let isPush = false;
+      let correctedOutcome = '';
+      let winAmount = 0;
+
+      if (playerTotal > 21) {
+        // Player busts - always lose
+        isWin = false;
+        isPush = false;
+        winAmount = 0;
+        correctedOutcome = 'Player busts! You lose.';
+      } else if (dealerTotal > 21) {
+        // Dealer busts - always win
+        isWin = true;
+        isPush = false;
+        // Blackjack pays 2.5x, standard win pays 2x
+        winAmount = isBlackjackWin ? Math.floor(bet * 2.5) : bet * 2;
+        correctedOutcome = isBlackjackWin
+          ? `Blackjack! Dealer busts! You win ${winAmount}!`
+          : 'Dealer busts! You win!';
+      } else if (playerTotal > dealerTotal) {
+        // Player has higher score
+        isWin = true;
+        isPush = false;
+        // Blackjack pays 2.5x, standard win pays 2x
+        winAmount = isBlackjackWin ? Math.floor(bet * 2.5) : bet * 2;
+        correctedOutcome = isBlackjackWin
+          ? `Blackjack! You win ${winAmount}!`
+          : `You win with ${playerTotal} vs Dealer's ${dealerTotal}!`;
+      } else if (playerTotal < dealerTotal) {
+        // Dealer has higher score - lose
+        isWin = false;
+        isPush = false;
+        winAmount = 0;
+        correctedOutcome = `Dealer wins with ${dealerTotal} vs your ${playerTotal}.`;
+      } else {
+        // Push (tie) - return original bet
+        isWin = false;
+        isPush = true;
+        winAmount = bet;
+        correctedOutcome = `Push! It's a tie at ${playerTotal}.`;
+      }
+
+      // Use corrected result with calculated winAmount
+      const correctedResult = {
+        ...gameResult,
+        win: isWin,
+        outcome: correctedOutcome,
+        winAmount: winAmount,
+      };
+
+      setResult(correctedResult);
+
+      if (isWin) {
         setShowWinEffect(true);
         setConfetti(true);
-        playWin(gameResult.winAmount, bet);
+        playWin(winAmount, bet);
         setTimeout(() => setConfetti(false), 5000);
+      } else if (isPush) {
+        // Push - no win/lose effects, just return bet
+        setShowWinEffect(false);
+        setShowLoseEffect(false);
       } else {
         setShowLoseEffect(true);
         playLose();
-        setTimeout(() => setShowLoseEffect(false), 500);
+        setTimeout(() => setShowLoseEffect(false), 5000);
       }
     } catch (error) {
       console.error('Game error:', error);
@@ -175,7 +300,7 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
   };
 
   // Render a card with 3D flip effect
-  const renderCard = (card: Card, index: number, isDealer: boolean, isHidden: boolean = false) => {
+  const renderCard = (card: Card, index: number, isDealer: boolean, isHidden: boolean = false, isPlayer: boolean = false) => {
     const suit = SUITS[card.suit];
     const rotation = isDealer ? index * 5 : index * -5; // Slight fan effect
 
@@ -347,32 +472,39 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
       {renderConfetti()}
 
       {/* Game Header */}
-      <div className="text-center mb-6">
-        <h2 className="text-3xl font-casino font-bold text-gold-gradient mb-2">
+      <div className="text-center mb-3 sm:mb-6">
+        <h2 className="text-2xl sm:text-3xl font-casino font-bold text-gold-gradient mb-1 sm:mb-2">
           Ace Blackjack
         </h2>
-        <p className="text-casino-text-secondary text-sm">
+        <p className="text-casino-text-secondary text-xs sm:text-sm">
           Beat the dealer to 21!
         </p>
       </div>
 
       {/* Game Table */}
-      <div className="relative mb-8">
-        <div className="bg-gradient-to-br from-green-900 via-green-800 to-green-900 rounded-2xl p-6 border-4 border-casino-gold/30 shadow-2xl min-h-[320px]"
+      <div className="relative mb-4 sm:mb-8">
+        <div className="bg-gradient-to-br from-green-900 via-green-800 to-green-900 rounded-2xl p-3 sm:p-6 border-4 border-casino-gold/30 shadow-2xl min-h-[260px] sm:min-h-[320px]"
         >
           {/* Felt texture */}
           <div className="absolute inset-0 rounded-2xl opacity-20 bg-[radial-gradient(circle_at_50%_50%,_#ffffff_1px,_transparent_1px)] bg-[length:6px_6px]"
           />
 
           {/* Dealer Section */}
-          <div className="relative mb-8">
+          <div className="relative mb-4 sm:mb-8">
             <div className="text-center mb-2">
               <span className="text-xs text-casino-text-secondary uppercase tracking-wider">Dealer</span>
-              {showDealerCards && result && (
-                <span className="ml-2 text-casino-gold font-bold">({result.dealerTotal})</span>
+              {/* Show dealer score: always calculate dynamically on frontend */}
+              {dealerCards.length > 0 && (
+                <span className="ml-2 text-casino-gold font-bold">
+                  ({/* During active play with hidden card, only show first visible card's value */
+                  !showDealerCards
+                    ? calculateTotal([dealerCards[0]])
+                    /* When game is over or all cards revealed, show full total of all dealer cards */
+                    : calculateTotal(dealerCards) || 0})
+                </span>
               )}
             </div>
-            <div className="flex justify-center items-center h-28">
+            <div className="flex justify-center items-center h-24 sm:h-28">
               {dealerCards.length > 0 ? (
                 <div className="flex items-center">
                   {dealerCards.map((card, index) =>
@@ -397,10 +529,10 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
                 <span className="ml-2 text-casino-gold font-bold">({calculateTotal(playerCards)})</span>
               )}
             </div>
-            <div className="flex justify-center items-center h-28">
+            <div className="flex justify-center items-center h-24 sm:h-28">
               {playerCards.length > 0 ? (
                 <div className="flex items-center">
-                  {playerCards.map((card, index) => renderCard(card, index, false))}
+                  {playerCards.map((card, index) => renderCard(card, index, false, !cardsRevealed, true))}
                 </div>
               ) : (
                 <div className="text-casino-text-muted text-sm">Click Deal to play</div>
@@ -414,7 +546,7 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
               <motion.div
                 initial={{ opacity: 0, scale: 0.5 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-casino-gold text-casino-dark font-casino font-bold text-2xl px-6 py-3 rounded-full shadow-lg glow-gold-strong z-10"
+                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-casino-gold text-casino-dark font-casino font-bold text-lg sm:text-2xl px-4 sm:px-6 py-2 sm:py-3 rounded-full shadow-lg glow-gold-strong z-10"
               >
                 BLACKJACK!
               </motion.div>
@@ -430,15 +562,21 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
             initial={{ opacity: 0, y: 20, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            className={`text-center py-4 px-6 rounded-xl mb-6 border-2 ${
+            className={`text-center py-3 sm:py-4 px-4 sm:px-6 rounded-xl mb-3 sm:mb-6 border-2 ${
               result.win
                 ? 'bg-gradient-to-r from-casino-gold/20 to-casino-gold/10 border-casino-gold glow-gold-strong'
+                : result.outcome.toLowerCase().includes('push')
+                ? 'bg-blue-900/20 border-blue-500/50'
                 : 'bg-red-900/20 border-red-500/50'
             }`}
           >
             <motion.div
               className={`text-2xl font-bold font-casino ${
-                result.win ? 'text-gold-gradient glow-text-gold' : 'text-red-400'
+                result.win
+                  ? 'text-gold-gradient glow-text-gold'
+                  : result.outcome.toLowerCase().includes('push')
+                  ? 'text-casino-gold'
+                  : 'text-red-400'
               }`}
               animate={result.win ? { scale: [1, 1.1, 1] } : {}}
               transition={{ repeat: result.win ? 2 : 0, duration: 0.3 }}
@@ -447,6 +585,12 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
                 <span className="flex items-center justify-center gap-2">
                   <Sparkles className="w-6 h-6" />
                   YOU WON ${result.winAmount}!
+                  <Sparkles className="w-6 h-6" />
+                </span>
+              ) : result.outcome.toLowerCase().includes('push') ? (
+                <span className="flex items-center justify-center gap-2">
+                  <Sparkles className="w-6 h-6" />
+                  PUSH - Bet Returned
                   <Sparkles className="w-6 h-6" />
                 </span>
               ) : (
@@ -461,25 +605,25 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
       </AnimatePresence>
 
       {/* Bet Controls */}
-      <div className="space-y-4">
-        <div className="glass-panel rounded-xl p-4">
-          <label className="block text-sm text-casino-text-secondary mb-3 text-center">
+      <div className="space-y-3 sm:space-y-4">
+        <div className="glass-panel rounded-xl p-3 sm:p-4">
+          <label className="block text-xs sm:text-sm text-casino-text-secondary mb-2 sm:mb-3 text-center">
             Bet Amount
           </label>
-          <div className="flex items-center justify-center space-x-4">
+          <div className="flex items-center justify-center space-x-3 sm:space-x-4">
             <motion.button
               onClick={decreaseBet}
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
               disabled={isPlaying || bet <= minBet}
-              className="w-12 h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               -
             </motion.button>
 
-            <div className="flex items-center space-x-2 px-6 py-3 bg-casino-dark rounded-xl border border-casino-gold/30 min-w-[140px] justify-center">
-              <Coins className="w-5 h-5 text-casino-gold" />
-              <span className="text-2xl font-bold text-white">{bet}</span>
+            <div className="flex items-center space-x-2 px-4 sm:px-6 py-2 sm:py-3 bg-casino-dark rounded-xl border border-casino-gold/30 min-w-[110px] sm:min-w-[140px] justify-center">
+              <Coins className="w-4 h-4 sm:w-5 sm:h-5 text-casino-gold" />
+              <span className="text-xl sm:text-2xl font-bold text-white">{bet}</span>
             </div>
 
             <motion.button
@@ -487,48 +631,64 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
               disabled={isPlaying || bet >= maxBet || bet >= balance}
-              className="w-12 h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               +
             </motion.button>
           </div>
 
-          <div className="flex justify-between text-xs text-casino-text-muted mt-3 px-4">
+          <div className="flex justify-between text-xs text-casino-text-muted mt-2 sm:mt-3 px-4">
             <span>Min: {minBet}</span>
             <span>Max: {Math.min(maxBet, balance)}</span>
           </div>
         </div>
 
-        {/* Deal Button */}
-        <motion.button
-          onClick={dealHand}
-          disabled={isPlaying || bet > balance}
-          whileHover={!isPlaying && bet <= balance ? { scale: 1.02 } : {}}
-          whileTap={!isPlaying && bet <= balance ? { scale: 0.98 } : {}}
-          className={`w-full py-5 rounded-xl font-casino font-bold text-xl transition-all relative overflow-hidden ${
-            isPlaying || bet > balance
-              ? 'bg-casino-card text-casino-text-muted cursor-not-allowed'
-              : 'bg-gradient-to-r from-casino-gold to-casino-gold-dark text-casino-dark btn-premium'
-          }`}
-        >
-          {isPlaying ? (
+        {/* Reveal Cards Button - shown when cards are dealt but not revealed */}
+        {playerCards.length > 0 && !cardsRevealed && !result && !dealingCards ? (
+          <motion.button
+            onClick={revealCards}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="w-full py-3 sm:py-5 rounded-xl font-casino font-bold text-base sm:text-xl transition-all relative overflow-hidden bg-gradient-to-r from-casino-gold to-casino-gold-dark text-casino-dark btn-premium"
+          >
             <span className="flex items-center justify-center space-x-2">
-              <RotateCcw className="w-6 h-6 spinner" />
-              <span>Dealing...</span>
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span>REVEAL CARDS</span>
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
             </span>
-          ) : bet > balance ? (
-            'Insufficient Balance'
-          ) : (
-            <span className="flex items-center justify-center space-x-2">
-              <Sparkles className="w-5 h-5" />
-              <span>DEAL CARDS</span>
-              <Sparkles className="w-5 h-5" />
-            </span>
-          )}
-        </motion.button>
+          </motion.button>
+        ) : (
+          /* Deal Button */
+          <motion.button
+            onClick={dealHand}
+            disabled={isPlaying || bet > balance}
+            whileHover={!isPlaying && bet <= balance ? { scale: 1.02 } : {}}
+            whileTap={!isPlaying && bet <= balance ? { scale: 0.98 } : {}}
+            className={`w-full py-3 sm:py-5 rounded-xl font-casino font-bold text-base sm:text-xl transition-all relative overflow-hidden ${
+              isPlaying || bet > balance
+                ? 'bg-casino-card text-casino-text-muted cursor-not-allowed'
+                : 'bg-gradient-to-r from-casino-gold to-casino-gold-dark text-casino-dark btn-premium'
+            }`}
+          >
+            {isPlaying ? (
+              <span className="flex items-center justify-center space-x-2">
+                <RotateCcw className="w-5 h-5 sm:w-6 sm:h-6 spinner" />
+                <span>Dealing...</span>
+              </span>
+            ) : bet > balance ? (
+              'Insufficient Balance'
+            ) : (
+              <span className="flex items-center justify-center space-x-2">
+                <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span>DEAL CARDS</span>
+                <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
+              </span>
+            )}
+          </motion.button>
+        )}
 
         {/* Payout Info */}
-        <div className="mt-6 pt-4 border-t border-casino-gold/20">
+        <div className="mt-3 sm:mt-6 pt-2 sm:pt-4 border-t border-casino-gold/20">
           <p className="text-xs text-casino-text-muted text-center">
             Blackjack pays 3:2 • Win pays 1:1 • Push returns bet
           </p>

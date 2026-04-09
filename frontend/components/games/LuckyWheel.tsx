@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Coins, Sparkles, RotateCcw, Gift, Star } from 'lucide-react';
+import { Coins, Sparkles, RotateCcw, Gift, Star, X } from 'lucide-react';
 import { useGameSounds } from '@/hooks/useGameSounds';
 
 interface GameResult {
@@ -21,21 +21,39 @@ interface LuckyWheelProps {
   onClose: () => void;
 }
 
-// Wheel segments with different multipliers
+// 12 equal slices — each is exactly 30°
+const SLICE_DEGREES = 30;
+
 const WHEEL_SEGMENTS = [
-  { id: 0, label: '0x', multiplier: 0, color: '#DC2626', size: 1 },      // Red
-  { id: 1, label: '0.5x', multiplier: 0.5, color: '#7C3AED', size: 1 }, // Purple
-  { id: 2, label: '2x', multiplier: 2, color: '#16A34A', size: 2 },    // Green
-  { id: 3, label: '1x', multiplier: 1, color: '#3B82F6', size: 2 },     // Blue
-  { id: 4, label: '3x', multiplier: 3, color: '#D4AF37', size: 1 },     // Gold
-  { id: 5, label: '0.5x', multiplier: 0.5, color: '#7C3AED', size: 1 }, // Purple
-  { id: 6, label: '5x', multiplier: 5, color: '#FFD700', size: 1 },      // Yellow
-  { id: 7, label: '1x', multiplier: 1, color: '#3B82F6', size: 2 },    // Blue
-  { id: 8, label: '2x', multiplier: 2, color: '#16A34A', size: 2 },    // Green
-  { id: 9, label: '10x', multiplier: 10, color: '#FF6B00', size: 0.5 }, // Orange
-  { id: 10, label: '1x', multiplier: 1, color: '#3B82F6', size: 2 },    // Blue
-  { id: 11, label: '2x', multiplier: 2, color: '#16A34A', size: 2 },    // Green
+  { id: 0,  label: '0x',   multiplier: 0,   color: '#DC2626', size: 1 }, // Red
+  { id: 1,  label: '0.5x', multiplier: 0.5, color: '#7C3AED', size: 1 }, // Purple
+  { id: 2,  label: '2x',   multiplier: 2,   color: '#16A34A', size: 1 }, // Green
+  { id: 3,  label: '1x',   multiplier: 1,   color: '#3B82F6', size: 1 }, // Blue
+  { id: 4,  label: '3x',   multiplier: 3,   color: '#D4AF37', size: 1 }, // Gold
+  { id: 5,  label: '0.5x', multiplier: 0.5, color: '#7C3AED', size: 1 }, // Purple
+  { id: 6,  label: '5x',   multiplier: 5,   color: '#FFD700', size: 1 }, // Yellow
+  { id: 7,  label: '1x',   multiplier: 1,   color: '#3B82F6', size: 1 }, // Blue
+  { id: 8,  label: '2x',   multiplier: 2,   color: '#16A34A', size: 1 }, // Green
+  { id: 9,  label: '10x',  multiplier: 10,  color: '#FF6B00', size: 1 }, // Orange
+  { id: 10, label: '1x',   multiplier: 1,   color: '#3B82F6', size: 1 }, // Blue
+  { id: 11, label: '2x',   multiplier: 2,   color: '#16A34A', size: 1 }, // Green
 ];
+
+/**
+ * Returns the CSS rotate() value (mod 360°) that places the centre of the
+ * given segment id directly under the top pointer.
+ *
+ * Geometry:
+ *  - SVG 0° is at 3 o'clock; angles increase clockwise.
+ *  - CSS rotate() also rotates clockwise.
+ *  - After rotate(R), a point originally at SVG angle A appears at A + R in
+ *    the fixed frame.
+ *  - The pointer is at the top = 270° (clockwise from 3 o'clock).
+ *  - Centre of slice `id` is at SVG angle: id * 30 + 15
+ *  - So we need: (id*30 + 15) + R ≡ 270°  →  R = (270 - id*30 - 15 + 360) % 360
+ */
+const getRotationForSegment = (segmentId: number): number =>
+  (270 - segmentId * SLICE_DEGREES - SLICE_DEGREES / 2 + 360) % 360;
 
 export const LuckyWheel: React.FC<LuckyWheelProps> = ({
   balance,
@@ -46,16 +64,22 @@ export const LuckyWheel: React.FC<LuckyWheelProps> = ({
 }) => {
   const [bet, setBet] = useState(minBet);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isSpinning, setIsSpinning] = useState(false);
   const [result, setResult] = useState<GameResult | null>(null);
   const [wheelRotation, setWheelRotation] = useState(0);
+  const [finalAngle, setFinalAngle] = useState(0);
+  const [spinDuration, setSpinDuration] = useState(4000);
   const [showWinEffect, setShowWinEffect] = useState(false);
   const [showLoseEffect, setShowLoseEffect] = useState(false);
   const [confetti, setConfetti] = useState(false);
   const [tickerAngle, setTickerAngle] = useState(0);
   const [highlightedSegment, setHighlightedSegment] = useState<number | null>(null);
+  const [spinResult, setSpinResult] = useState<{ multiplier: number; winAmount: number } | null>(null);
+  const [showResultBanner, setShowResultBanner] = useState(false);
 
   const wheelRef = useRef<HTMLDivElement>(null);
   const tickerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const currentAngleRef = useRef(0); // tracks accumulated rotation to avoid stale closure
 
   const {
     playButtonClick,
@@ -105,36 +129,59 @@ export const LuckyWheel: React.FC<LuckyWheelProps> = ({
 
   // Spin the wheel
   const spinWheel = async () => {
-    if (isPlaying || bet > balance) return;
+    if (isSpinning || isPlaying || bet > balance) return;
 
+    // Reset states before new spin
+    setIsSpinning(true);
     setIsPlaying(true);
     setResult(null);
     setShowWinEffect(false);
     setShowLoseEffect(false);
     setConfetti(false);
     setHighlightedSegment(null);
+    setSpinResult(null);
+    setShowResultBanner(false);
+
+    // Reset wheel rotation to starting position (smoothly)
+    setWheelRotation(wheelRotation % 360);
 
     playWheelSpin();
 
     try {
       const gameResult = await onPlay(bet);
+      console.log('Backend Response:', gameResult);
 
-      // Calculate target rotation
-      const minSpins = 5;
-      const baseRotation = minSpins * 360;
+      // --- Angle calculation ------------------------------------------------
+      // 1. Which slice did the server pick?
+      const targetSegmentId = gameResult.segment ?? 0;
 
-      // Find the target segment
-      const targetSegment = segmentAngles.find(seg => seg.id === gameResult.segment);
-      if (!targetSegment) return;
+      // 2. What CSS rotate() value (0-359°) puts that slice under the pointer?
+      const segmentRotation = getRotationForSegment(targetSegmentId);
 
-      // Calculate the angle to land on target segment
-      // The pointer is at top (270 degrees), so we rotate opposite direction
-      const targetAngle = targetSegment.startAngle + targetSegment.angleSize / 2;
-      const finalRotation = baseRotation + (360 - targetAngle + 270) % 360;
+      // 3. How far must we rotate FROM the current wheel position to reach that
+      //    slice, always moving clockwise (forward)?
+      const normalizedCurrent = currentAngleRef.current % 360;
+      const forwardDelta = ((segmentRotation - normalizedCurrent) + 360) % 360;
+
+      // 4. Add 5 full spins so the animation is visually satisfying.
+      //    forwardDelta guarantees the wheel never goes backward.
+      const finalRotation = currentAngleRef.current + 5 * 360 + forwardDelta;
+      // ----------------------------------------------------------------------
+
+      setFinalAngle(finalRotation);
+      currentAngleRef.current = finalRotation;
+
+      const spinTime = 4000; // matches CSS transition 4s exactly
+      setSpinDuration(spinTime);
+
+      console.log(
+        `Spin started → segment ${targetSegmentId}, segmentRotation ${segmentRotation}°,` +
+        ` forwardDelta ${forwardDelta}°, finalAngle ${finalRotation}°`
+      );
 
       // Start ticker clicking effect during spin
       let tickCount = 0;
-      const maxTicks = 40; // Approximate number of segments passed
+      const maxTicks = Math.floor(spinTime / 80); // Dynamic tick count based on spin duration
       tickerIntervalRef.current = setInterval(() => {
         tickCount++;
         if (tickCount < maxTicks) {
@@ -150,12 +197,9 @@ export const LuckyWheel: React.FC<LuckyWheelProps> = ({
           }
           setTickerAngle(0);
         }
-      }, 100);
+      }, 80);
 
-      // Start spinning
-      setWheelRotation(finalRotation);
-
-      // Wait for spin to complete (4 seconds)
+      // Wait for spin to complete — must match the 4s CSS transition exactly
       await new Promise((resolve) => setTimeout(resolve, 4000));
 
       // Clear ticker
@@ -167,11 +211,21 @@ export const LuckyWheel: React.FC<LuckyWheelProps> = ({
       // Highlight winning segment
       setHighlightedSegment(gameResult.segment ?? null);
 
-      // Suspense delay
+      // Store spin result data (for the delayed result popup)
+      setSpinResult({
+        multiplier: gameResult.multiplier ?? 0,
+        winAmount: gameResult.winAmount ?? 0,
+      });
+
+      // Suspense delay before showing result
       playSuspense();
       await new Promise((resolve) => setTimeout(resolve, 800));
 
-      // Show result
+      // Show result popup after wheel stops and suspense delay
+      console.log('Spin finished, showing result');
+      setShowResultBanner(true);
+
+      // Show result (for compatibility with existing logic)
       setResult(gameResult);
 
       if (gameResult.win) {
@@ -182,22 +236,31 @@ export const LuckyWheel: React.FC<LuckyWheelProps> = ({
       } else {
         setShowLoseEffect(true);
         playLose();
-        setTimeout(() => setShowLoseEffect(false), 500);
+        setTimeout(() => setShowLoseEffect(false), 5000);
       }
-
-      // Reset wheel position after delay
-      setTimeout(() => {
-        setWheelRotation(finalRotation % 360);
-        setHighlightedSegment(null);
-      }, 3000);
     } catch (error) {
       console.error('Game error:', error);
       if (tickerIntervalRef.current) {
         clearInterval(tickerIntervalRef.current);
       }
     } finally {
+      setIsSpinning(false);
       setIsPlaying(false);
     }
+  };
+
+  // Reset states to play again
+  const playAgain = () => {
+    setSpinResult(null);
+    setShowResultBanner(false);
+    setShowWinEffect(false);
+    setShowLoseEffect(false);
+    setHighlightedSegment(null);
+    // Normalise accumulated angle so the next spin starts from <360
+    const normalised = currentAngleRef.current % 360;
+    currentAngleRef.current = normalised;
+    setFinalAngle(normalised);
+    setWheelRotation(normalised);
   };
 
   // Cleanup on unmount
@@ -281,18 +344,18 @@ export const LuckyWheel: React.FC<LuckyWheelProps> = ({
       {renderConfetti()}
 
       {/* Game Header */}
-      <div className="text-center mb-6">
-        <h2 className="text-3xl font-casino font-bold text-gold-gradient mb-2">
+      <div className="text-center mb-3 sm:mb-6">
+        <h2 className="text-2xl sm:text-3xl font-casino font-bold text-gold-gradient mb-1 sm:mb-2">
           Lucky Wheel
         </h2>
-        <p className="text-casino-text-secondary text-sm">
+        <p className="text-casino-text-secondary text-xs sm:text-sm">
           Spin the wheel and multiply your bet!
         </p>
       </div>
 
       {/* Lucky Wheel */}
-      <div className="relative mb-8 flex justify-center">
-        <div className="relative w-80 h-80">
+      <div className="relative mb-4 sm:mb-8 flex justify-center">
+        <div className="relative w-[280px] h-[280px] sm:w-80 sm:h-80">
           {/* Outer glow ring */}
           <div className="absolute inset-0 rounded-full bg-gradient-to-r from-casino-gold/30 via-casino-gold/10 to-casino-gold/30 blur-xl" />
 
@@ -301,8 +364,8 @@ export const LuckyWheel: React.FC<LuckyWheelProps> = ({
             ref={wheelRef}
             className="absolute inset-4 rounded-full overflow-hidden border-4 border-casino-gold/50 shadow-2xl"
             style={{
-              transform: `rotate(${wheelRotation}deg)`,
-              transition: isPlaying ? 'transform 4s cubic-bezier(0.1, 0.3, 0.3, 1)' : 'transform 0.5s ease-out',
+              transform: `rotate(${finalAngle}deg)`,
+              transition: isSpinning ? 'transform 4s cubic-bezier(0.33, 1, 0.68, 1)' : 'none',
             }}
           >
             <svg viewBox="0 0 300 300" className="w-full h-full">
@@ -381,7 +444,7 @@ export const LuckyWheel: React.FC<LuckyWheelProps> = ({
       </div>
 
       {/* Multiplier Preview */}
-      <div className="glass-panel rounded-xl p-4 mb-6">
+      <div className="glass-panel rounded-xl p-3 sm:p-4 mb-3 sm:mb-6">
         <p className="text-sm text-casino-text-secondary text-center mb-3">Possible Multipliers</p>
         <div className="flex flex-wrap justify-center gap-2">
           {WHEEL_SEGMENTS.filter((seg, idx, arr) => arr.findIndex(s => s.multiplier === seg.multiplier) === idx)
@@ -403,86 +466,178 @@ export const LuckyWheel: React.FC<LuckyWheelProps> = ({
         </div>
       </div>
 
-      {/* Result Display */}
+      {/* Result Popup Modal */}
       <AnimatePresence>
-        {result && (
+        {showResultBanner && spinResult && (
           <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            className={`text-center py-4 px-6 rounded-xl mb-6 border-2 ${
-              result.win
-                ? 'bg-gradient-to-r from-casino-gold/20 to-casino-gold/10 border-casino-gold glow-gold-strong'
-                : 'bg-red-900/20 border-red-500/50'
-            }`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={playAgain}
           >
             <motion.div
-              className={`text-2xl font-bold font-casino ${
-                result.win ? 'text-gold-gradient glow-text-gold' : 'text-red-400'
+              initial={{ opacity: 0, scale: 0.5, y: 50 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: 'spring', damping: 15, stiffness: 300 }}
+              className={`relative w-full max-w-md p-5 sm:p-8 rounded-2xl border-4 shadow-2xl ${
+                spinResult.multiplier > 0
+                  ? 'bg-gradient-to-br from-casino-gold/30 via-casino-dark to-casino-gold/20 border-casino-gold glow-gold-strong'
+                  : 'bg-gradient-to-br from-red-900/40 via-casino-dark to-red-900/30 border-red-500/50'
               }`}
-              animate={result.win ? { scale: [1, 1.1, 1] } : {}}
-              transition={{ repeat: result.win ? 2 : 0, duration: 0.3 }}
+              onClick={(e) => e.stopPropagation()}
             >
-              {result.win ? (
-                <span className="flex items-center justify-center gap-2">
-                  <Sparkles className="w-6 h-6" />
-                  YOU WON ${result.winAmount}!
-                  <Sparkles className="w-6 h-6" />
-                </span>
-              ) : (
-                'Better luck next spin!'
-              )}
-            </motion.div>
-
-            <div className="mt-2 flex items-center justify-center space-x-2">
-              <span className="text-sm text-casino-text-secondary">Landed on:</span>
-              <span
-                className="font-bold text-lg px-3 py-1 rounded"
-                style={{
-                  backgroundColor: WHEEL_SEGMENTS.find(s => s.id === result.segment)?.color,
-                }}
+              {/* Close button */}
+              <button
+                onClick={playAgain}
+                className="absolute top-3 right-3 p-2 rounded-full hover:bg-white/10 transition-colors"
               >
-                {result.multiplier}x
-              </span>
-            </div>
+                <X className="w-5 h-5 text-casino-text-secondary" />
+              </button>
+
+              {/* Result Icon */}
+              <div className="text-center mb-4 sm:mb-6">
+                <motion.div
+                  initial={{ scale: 0, rotate: -180 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={{ delay: 0.2, type: 'spring', damping: 10 }}
+                  className={`inline-flex items-center justify-center w-16 h-16 sm:w-24 sm:h-24 rounded-full ${
+                    spinResult.multiplier > 0
+                      ? 'bg-gradient-to-br from-casino-gold to-casino-gold-dark'
+                      : 'bg-gradient-to-br from-red-500 to-red-700'
+                  }`}
+                >
+                  {spinResult.multiplier > 0 ? (
+                    <Sparkles className="w-8 h-8 sm:w-12 sm:h-12 text-casino-dark" />
+                  ) : (
+                    <span className="text-3xl sm:text-5xl">😢</span>
+                  )}
+                </motion.div>
+              </div>
+
+              {/* Result Message */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="text-center mb-4 sm:mb-6"
+              >
+                {spinResult.multiplier > 0 ? (
+                  <>
+                    <h3 className="text-2xl sm:text-3xl font-casino font-bold text-gold-gradient glow-text-gold mb-2">
+                      🎉 Congratulations!
+                    </h3>
+                    <p className="text-base sm:text-xl text-white mb-2">
+                      You hit <span className="font-bold text-casino-gold">{spinResult.multiplier}x</span>!
+                    </p>
+                    <div className="text-3xl sm:text-4xl font-bold text-casino-gold glow-text-gold">
+                      +${spinResult.winAmount}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-xl sm:text-2xl font-casino font-bold text-red-400 mb-2">
+                      Better Luck Next Time!
+                    </h3>
+                    <p className="text-base sm:text-lg text-casino-text-secondary">
+                      You hit <span className="font-bold text-red-400">0x</span>
+                    </p>
+                    <p className="text-sm text-casino-text-muted mt-2">
+                      Don&apos;t give up! Try spinning again.
+                    </p>
+                  </>
+                )}
+              </motion.div>
+
+              {/* Multiplier Badge */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.4 }}
+                className="flex items-center justify-center mb-6"
+              >
+                <div className="flex items-center space-x-3 px-4 py-2 rounded-full bg-casino-card/50">
+                  <span className="text-sm text-casino-text-secondary">Landed on:</span>
+                  <span
+                    className="font-bold text-xl px-4 py-1 rounded-full text-white"
+                    style={{
+                      backgroundColor: WHEEL_SEGMENTS.find(s => s.multiplier === spinResult.multiplier)?.color || '#DC2626',
+                      boxShadow: '0 0 20px currentColor',
+                    }}
+                  >
+                    {spinResult.multiplier}x
+                  </span>
+                </div>
+              </motion.div>
+
+              {/* Play Again Button */}
+              <motion.button
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.5 }}
+                onClick={playAgain}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className={`w-full py-4 rounded-xl font-casino font-bold text-xl transition-all ${
+                  spinResult.multiplier > 0
+                    ? 'bg-gradient-to-r from-casino-gold to-casino-gold-dark text-casino-dark hover:shadow-lg hover:shadow-casino-gold/30'
+                    : 'bg-gradient-to-r from-casino-card to-casino-card border border-casino-gold/30 text-casino-gold hover:border-casino-gold'
+                }`}
+              >
+                {spinResult.multiplier > 0 ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Gift className="w-5 h-5" />
+                    Play Again
+                    <Gift className="w-5 h-5" />
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center gap-2">
+                    <RotateCcw className="w-5 h-5" />
+                    Try Again
+                    <RotateCcw className="w-5 h-5" />
+                  </span>
+                )}
+              </motion.button>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Bet Controls */}
-      <div className="space-y-4">
-        <div className="glass-panel rounded-xl p-4">
-          <label className="block text-sm text-casino-text-secondary mb-3 text-center">
+      <div className="space-y-3 sm:space-y-4">
+        <div className="glass-panel rounded-xl p-3 sm:p-4">
+          <label className="block text-xs sm:text-sm text-casino-text-secondary mb-2 sm:mb-3 text-center">
             Bet Amount
           </label>
-          <div className="flex items-center justify-center space-x-4">
+          <div className="flex items-center justify-center space-x-3 sm:space-x-4">
             <motion.button
               onClick={decreaseBet}
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              disabled={isPlaying || bet <= minBet}
-              className="w-12 h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              disabled={isSpinning || bet <= minBet}
+              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               -
             </motion.button>
 
-            <div className="flex items-center space-x-2 px-6 py-3 bg-casino-dark rounded-xl border border-casino-gold/30 min-w-[140px] justify-center">
-              <Coins className="w-5 h-5 text-casino-gold" />
-              <span className="text-2xl font-bold text-white">{bet}</span>
+            <div className="flex items-center space-x-2 px-4 sm:px-6 py-2 sm:py-3 bg-casino-dark rounded-xl border border-casino-gold/30 min-w-[110px] sm:min-w-[140px] justify-center">
+              <Coins className="w-4 h-4 sm:w-5 sm:h-5 text-casino-gold" />
+              <span className="text-xl sm:text-2xl font-bold text-white">{bet}</span>
             </div>
 
             <motion.button
               onClick={increaseBet}
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              disabled={isPlaying || bet >= maxBet || bet >= balance}
-              className="w-12 h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              disabled={isSpinning || bet >= maxBet || bet >= balance}
+              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               +
             </motion.button>
           </div>
 
-          <div className="flex justify-between text-xs text-casino-text-muted mt-3 px-4">
+          <div className="flex justify-between text-xs text-casino-text-muted mt-2 sm:mt-3 px-4">
             <span>Min: {minBet}</span>
             <span>Max: {Math.min(maxBet, balance)}</span>
           </div>
@@ -491,33 +646,33 @@ export const LuckyWheel: React.FC<LuckyWheelProps> = ({
         {/* Spin Button */}
         <motion.button
           onClick={spinWheel}
-          disabled={isPlaying || bet > balance}
-          whileHover={!isPlaying && bet <= balance ? { scale: 1.02 } : {}}
-          whileTap={!isPlaying && bet <= balance ? { scale: 0.98 } : {}}
-          className={`w-full py-5 rounded-xl font-casino font-bold text-xl transition-all relative overflow-hidden ${
-            isPlaying || bet > balance
+          disabled={isSpinning || bet > balance}
+          whileHover={!isSpinning && bet <= balance ? { scale: 1.02 } : {}}
+          whileTap={!isSpinning && bet <= balance ? { scale: 0.98 } : {}}
+          className={`w-full py-3 sm:py-5 rounded-xl font-casino font-bold text-base sm:text-xl transition-all relative overflow-hidden ${
+            isSpinning || bet > balance
               ? 'bg-casino-card text-casino-text-muted cursor-not-allowed'
               : 'bg-gradient-to-r from-casino-gold to-casino-gold-dark text-casino-dark btn-premium'
           }`}
         >
-          {isPlaying ? (
+          {isSpinning ? (
             <span className="flex items-center justify-center space-x-2">
-              <RotateCcw className="w-6 h-6 spinner" />
+              <RotateCcw className="w-5 h-5 sm:w-6 sm:h-6 spinner" />
               <span>Spinning...</span>
             </span>
           ) : bet > balance ? (
             'Insufficient Balance'
           ) : (
             <span className="flex items-center justify-center space-x-2">
-              <Gift className="w-5 h-5" />
+              <Gift className="w-4 h-4 sm:w-5 sm:h-5" />
               <span>SPIN THE WHEEL</span>
-              <Gift className="w-5 h-5" />
+              <Gift className="w-4 h-4 sm:w-5 sm:h-5" />
             </span>
           )}
         </motion.button>
 
         {/* Payout Info */}
-        <div className="mt-6 pt-4 border-t border-casino-gold/20">
+        <div className="mt-3 sm:mt-6 pt-2 sm:pt-4 border-t border-casino-gold/20">
           <p className="text-xs text-casino-text-muted text-center">
             Multipliers: 0x to 10x • Higher multipliers have lower chances
           </p>
