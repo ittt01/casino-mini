@@ -191,7 +191,7 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
       await new Promise((resolve) => setTimeout(resolve, 800));
 
       // Get the current dealer cards (either from backend or current state)
-      let currentDealerCards = gameResult.dealerCards?.length > 0
+      let currentDealerCards = (gameResult?.dealerCards && gameResult.dealerCards.length > 0)
         ? gameResult.dealerCards
         : dealerCards;
 
