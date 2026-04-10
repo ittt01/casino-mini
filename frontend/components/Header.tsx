@@ -2,12 +2,14 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Coins, User, LogOut, Crown, Settings, Menu, X } from 'lucide-react';
+import { Coins, User, LogOut, Crown, Settings, Menu, X, Music, VolumeX } from 'lucide-react';
+import { useBGM } from '@/contexts/BGMContext';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 export const Header: React.FC = () => {
   const { user, isAuthenticated, isAdmin, logout } = useAuth();
+  const { isMuted, toggleMute } = useBGM();
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -102,6 +104,20 @@ export const Header: React.FC = () => {
                 </Link>
               </div>
             )}
+
+            {/* BGM Toggle */}
+            <button
+              onClick={toggleMute}
+              className="p-2 rounded-lg hover:bg-casino-card transition-colors"
+              aria-label={isMuted ? 'Unmute music' : 'Mute music'}
+              title={isMuted ? 'Unmute music' : 'Mute music'}
+            >
+              {isMuted ? (
+                <VolumeX className="w-5 h-5 text-casino-text-secondary" />
+              ) : (
+                <Music className="w-5 h-5 text-casino-gold animate-pulse" />
+              )}
+            </button>
 
             {/* Hamburger — mobile only */}
             <button

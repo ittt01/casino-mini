@@ -19,6 +19,7 @@ interface GameResult {
   dealerCards?: Card[];
   playerTotal?: number;
   dealerTotal?: number;
+  guaranteedWin?: boolean;
 }
 
 interface AceBlackjackProps {
@@ -37,6 +38,77 @@ const SUITS = {
 };
 
 const VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+
+// ── Module-level helpers (used by both component logic and pre-deal rigging) ──
+
+const calculateTotal = (cards: Card[]): number => {
+  let total = 0;
+  let aces = 0;
+  cards.forEach((card) => {
+    if (card.value === 'A') { aces++; total += 11; }
+    else if (['J', 'Q', 'K'].includes(card.value)) { total += 10; }
+    else { total += card.numericValue || 0; }
+  });
+  while (total > 21 && aces > 0) { total -= 10; aces--; }
+  return total;
+};
+
+// Returns a random card from VALUES that will NOT bust the given hand.
+// Used for forced-loss draws so the dealer never busts mid-animation.
+const generateNoBustCard = (currentHand: Card[]): Card => {
+  const SUIT_LIST: Card['suit'][] = ['hearts', 'diamonds', 'clubs', 'spades'];
+  const rSuit = (): Card['suit'] => SUIT_LIST[Math.floor(Math.random() * 4)];
+
+  const valid: { value: string; numericValue: number }[] = [];
+  for (const v of VALUES) {
+    const numericValue = v === 'A' ? 11 : ['J', 'Q', 'K'].includes(v) ? 10 : parseInt(v);
+    if (calculateTotal([...currentHand, { suit: 'spades', value: v, numericValue }]) <= 21) {
+      valid.push({ value: v, numericValue });
+    }
+  }
+  // Ace always works as a soft 1 — use as ultimate fallback
+  if (valid.length === 0) return { suit: rSuit(), value: 'A', numericValue: 11 };
+  const p = valid[Math.floor(Math.random() * valid.length)];
+  return { suit: rSuit(), value: p.value, numericValue: p.numericValue };
+};
+
+// Returns a card that will bust the given hand (total > 21).
+// If no single card can bust (e.g. soft hand), returns the highest non-busting
+// card to harden the hand so the next draw can bust it.
+// Used for guaranteed-win mode so the dealer always busts.
+const generateBustCard = (currentHand: Card[]): Card => {
+  const SUIT_LIST: Card['suit'][] = ['hearts', 'diamonds', 'clubs', 'spades'];
+  const rSuit = (): Card['suit'] => SUIT_LIST[Math.floor(Math.random() * 4)];
+
+  const busting: { value: string; numericValue: number }[] = [];
+  for (const v of VALUES) {
+    const numericValue = v === 'A' ? 11 : ['J', 'Q', 'K'].includes(v) ? 10 : parseInt(v);
+    if (calculateTotal([...currentHand, { suit: 'spades', value: v, numericValue }]) > 21) {
+      busting.push({ value: v, numericValue });
+    }
+  }
+
+  if (busting.length > 0) {
+    const p = busting[Math.floor(Math.random() * busting.length)];
+    return { suit: rSuit(), value: p.value, numericValue: p.numericValue };
+  }
+
+  // Soft hand — can't bust in one card. Return the highest non-ace card to
+  // harden the hand so the next call can bust it.
+  let best = { value: '10', numericValue: 10 };
+  let bestNumeric = 0;
+  for (const v of VALUES) {
+    if (v === 'A') continue;
+    const numericValue = ['J', 'Q', 'K'].includes(v) ? 10 : parseInt(v);
+    const newTotal = calculateTotal([...currentHand, { suit: 'spades', value: v, numericValue }]);
+    if (newTotal <= 21 && numericValue > bestNumeric) {
+      best = { value: v, numericValue };
+      bestNumeric = numericValue;
+    }
+  }
+  return { suit: rSuit(), value: best.value, numericValue: best.numericValue };
+};
+
 
 export const AceBlackjack: React.FC<AceBlackjackProps> = ({
   balance,
@@ -87,6 +159,18 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
     playButtonClick();
     setBet((prev) => Math.min(maxBet, prev + 10));
   }, [maxBet, playButtonClick]);
+
+  // Responsive card sizing — smaller on mobile to prevent overflow
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 640);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+  const CARD_W   = isMobile ? 90  : 128;
+  const CARD_H   = isMobile ? 132 : 192;
+  const CARD_STEP = isMobile ? 24  : 36;
 
   // Store initial cards for reveal feature
   const [initialPlayerCards, setInitialPlayerCards] = useState<Card[]>([]);
@@ -144,19 +228,36 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
     setDealingCards(false);
   };
 
-  // Dealer must hit until they have 17 or more
-  const drawDealerCards = async (currentDealerCards: Card[]): Promise<Card[]> => {
+  // Dealer draws cards with optional forced-loss or forced-win mode.
+  // forceLoss=true: only draw no-bust cards, keep drawing past 17 until dealer
+  //   beats playerHandTotal (forced loss for the player).
+  // forceWin=true: keep drawing past 17 using bust-targeted cards until dealer
+  //   exceeds 21 (guaranteed win for the player).
+  const drawDealerCards = async (
+    currentDealerCards: Card[],
+    forceLoss: boolean = false,
+    forceWin: boolean = false,
+    playerHandTotal: number = 0,
+  ): Promise<Card[]> => {
     let dealerHand = [...currentDealerCards];
-    let dealerScore = calculateTotal(dealerHand);
 
-    // Dealer draws until they have at least 17
-    while (dealerScore < 17) {
+    const shouldKeepDrawing = (): boolean => {
+      const score = calculateTotal(dealerHand);
+      if (score > 21) return false;          // Already bust — stop
+      if (score < 17) return true;           // Always draw below 17
+      if (forceLoss) return score < 21 && score <= playerHandTotal;
+      if (forceWin) return true;             // Keep drawing until bust
+      return false;                          // Normal: stop at 17+
+    };
+
+    while (shouldKeepDrawing()) {
       await new Promise((resolve) => setTimeout(resolve, 600));
-      const newCard = generateCard();
+      const newCard = forceLoss
+        ? generateNoBustCard(dealerHand)
+        : forceWin
+        ? generateBustCard(dealerHand)
+        : generateCard();
       dealerHand = [...dealerHand, newCard];
-      dealerScore = calculateTotal(dealerHand);
-
-      // Update state so player sees the card being drawn
       setDealerCards(dealerHand);
       playCardDeal();
     }
@@ -185,31 +286,59 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
     try {
       const gameResult = await onPlay(bet);
 
-      // Reveal dealer cards
-      setShowDealerCards(true);
-      playCardFlip();
-      await new Promise((resolve) => setTimeout(resolve, 800));
-
-      // Get the current dealer cards (either from backend or current state)
+      // ── Resolve card state ──────────────────────────────────────────────────
       let currentDealerCards = (gameResult?.dealerCards && gameResult.dealerCards.length > 0)
         ? gameResult.dealerCards
         : dealerCards;
 
-      // Update player cards from backend if provided
       let currentPlayerCards = initialPlayerCards;
       if (gameResult.playerCards && gameResult.playerCards.length > 0) {
         currentPlayerCards = gameResult.playerCards;
         setPlayerCards(gameResult.playerCards);
       }
 
-      // Dealer MUST draw until they have at least 17 (only if frontend controls the game)
-      // Check if dealer already has >= 17 from backend, otherwise draw
-      const currentDealerScore = calculateTotal(currentDealerCards);
-      if (currentDealerScore < 17) {
-        currentDealerCards = await drawDealerCards(currentDealerCards);
-      } else {
-        setDealerCards(currentDealerCards);
+      // winRate === 100 → guaranteed win; winRate === 0 → guaranteed loss
+      const isGuaranteedWin = gameResult.guaranteedWin === true;
+
+      // ── Rig hidden dealer card BEFORE the flip animation ────────────────────
+      // The hidden card (index-1) was never seen — safe to swap silently.
+      // The face-up card (index-0) is already visible and must not change.
+      if (currentDealerCards.length >= 2) {
+        const faceUpCard = currentDealerCards[0];
+        if (isGuaranteedWin) {
+          // Guaranteed win: give dealer a high-value hidden card to set up a bust.
+          const SUIT_LIST: Card['suit'][] = ['hearts', 'diamonds', 'clubs', 'spades'];
+          const highValues = ['10', 'J', 'Q', 'K'];
+          const hv = highValues[Math.floor(Math.random() * highValues.length)];
+          const weakHidden: Card = {
+            suit: SUIT_LIST[Math.floor(Math.random() * 4)],
+            value: hv,
+            numericValue: 10,
+          };
+          currentDealerCards = [faceUpCard, weakHidden];
+          setDealerCards(currentDealerCards);
+        } else if (!gameResult.win) {
+          // Forced-loss: give dealer a strong hidden card so they start from a
+          // good position and keep drawing until they beat the player.
+          const strongHidden = generateNoBustCard([faceUpCard]);
+          currentDealerCards = [faceUpCard, strongHidden];
+          setDealerCards(currentDealerCards);
+        }
       }
+      // ────────────────────────────────────────────────────────────────────────
+
+      // Reveal dealer cards (flip animation plays now, showing the updated hidden card)
+      setShowDealerCards(true);
+      playCardFlip();
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      // Draw additional dealer cards:
+      //   forceWin  → keep drawing with bust-targeted cards until dealer exceeds 21
+      //   forceLoss → keep drawing (no-bust) until dealer beats player
+      //   normal    → draw until 17+
+      const pTotal = calculateTotal(currentPlayerCards);
+      const forceLoss = !gameResult.win && !isGuaranteedWin;
+      currentDealerCards = await drawDealerCards(currentDealerCards, forceLoss, isGuaranteedWin, pTotal);
 
       // Stop dealing state so button doesn't look stuck while player views cards
       setDealingCards(false);
@@ -307,7 +436,7 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
     return (
       <motion.div
         key={`${isDealer ? 'dealer' : 'player'}-${index}`}
-        className="relative w-16 h-24 cursor-pointer"
+        className="relative cursor-pointer"
         initial={{
           x: isDealer ? 300 : -300,
           y: -100,
@@ -315,7 +444,7 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
           rotate: isDealer ? 30 : -30,
         }}
         animate={{
-          x: index * 20,
+          x: 0,
           y: 0,
           opacity: 1,
           rotate: rotation,
@@ -328,6 +457,11 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
         }}
         style={{
           transformStyle: 'preserve-3d',
+          width: `${CARD_W}px`,
+          height: `${CARD_H}px`,
+          flexShrink: 0,
+          marginLeft: index > 0 ? `${-(CARD_W - CARD_STEP)}px` : '0px',
+          zIndex: index,
         }}
       >
         {/* Card container with flip */}
@@ -352,23 +486,23 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
             {!isHidden && suit && (
               <>
                 {/* Top left */}
-                <div className={`absolute top-1 left-1 text-xs font-bold ${suit.color}`}>
+                <div className={`absolute top-2 left-2 text-xl font-black leading-none ${suit.color}`}>
                   {card.value}
                 </div>
-                <div className={`absolute top-4 left-1 text-sm ${suit.color}`}>
+                <div className={`absolute top-9 left-2 text-2xl leading-none ${suit.color}`}>
                   {suit.symbol}
                 </div>
 
                 {/* Center */}
-                <div className={`absolute inset-0 flex items-center justify-center text-4xl ${suit.color}`}>
+                <div className={`absolute inset-0 flex items-center justify-center text-7xl ${suit.color}`}>
                   {suit.symbol}
                 </div>
 
                 {/* Bottom right (rotated) */}
-                <div className={`absolute bottom-1 right-1 text-xs font-bold rotate-180 ${suit.color}`}>
+                <div className={`absolute bottom-2 right-2 text-xl font-black rotate-180 leading-none ${suit.color}`}>
                   {card.value}
                 </div>
-                <div className={`absolute bottom-4 right-1 text-sm rotate-180 ${suit.color}`}>
+                <div className={`absolute bottom-9 right-2 text-2xl rotate-180 leading-none ${suit.color}`}>
                   {suit.symbol}
                 </div>
               </>
@@ -401,39 +535,14 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
               }}
             />
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-8 h-8 rounded-full border-2 border-casino-gold/50 flex items-center justify-center">
-                <span className="text-casino-gold text-xs">★</span>
+              <div className="w-16 h-16 rounded-full border-2 border-casino-gold/50 flex items-center justify-center">
+                <span className="text-casino-gold text-2xl">★</span>
               </div>
             </div>
           </div>
         </motion.div>
       </motion.div>
     );
-  };
-
-  // Calculate total
-  const calculateTotal = (cards: Card[]) => {
-    let total = 0;
-    let aces = 0;
-
-    cards.forEach((card) => {
-      if (card.value === 'A') {
-        aces++;
-        total += 11;
-      } else if (['J', 'Q', 'K'].includes(card.value)) {
-        total += 10;
-      } else {
-        total += card.numericValue || 0;
-      }
-    });
-
-    // Adjust for aces
-    while (total > 21 && aces > 0) {
-      total -= 10;
-      aces--;
-    }
-
-    return total;
   };
 
   // Confetti effect
@@ -468,45 +577,42 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
   };
 
   return (
-    <div className={`relative ${showLoseEffect ? 'shake-screen' : ''}`}>
+    <div className={`relative p-3 sm:p-5 ${showLoseEffect ? 'shake-screen' : ''}`}>
       {renderConfetti()}
 
       {/* Game Header */}
-      <div className="text-center mb-3 sm:mb-6">
-        <h2 className="text-2xl sm:text-3xl font-casino font-bold text-gold-gradient mb-1 sm:mb-2">
+      <div className="text-center mb-1.5">
+        <h2 className="text-xl sm:text-3xl font-casino font-bold text-gold-gradient leading-tight">
           Ace Blackjack
         </h2>
-        <p className="text-casino-text-secondary text-xs sm:text-sm">
+        <p className="text-casino-text-secondary text-xs hidden sm:block">
           Beat the dealer to 21!
         </p>
       </div>
 
       {/* Game Table */}
-      <div className="relative mb-4 sm:mb-8">
-        <div className="bg-gradient-to-br from-green-900 via-green-800 to-green-900 rounded-2xl p-3 sm:p-6 border-4 border-casino-gold/30 shadow-2xl min-h-[260px] sm:min-h-[320px]"
+      <div className="relative mb-2">
+        <div className="bg-gradient-to-br from-green-900 via-green-800 to-green-900 rounded-2xl p-3 border-4 border-casino-gold/30 shadow-2xl"
         >
           {/* Felt texture */}
           <div className="absolute inset-0 rounded-2xl opacity-20 bg-[radial-gradient(circle_at_50%_50%,_#ffffff_1px,_transparent_1px)] bg-[length:6px_6px]"
           />
 
           {/* Dealer Section */}
-          <div className="relative mb-4 sm:mb-8">
-            <div className="text-center mb-2">
+          <div className="relative mb-2">
+            <div className="text-center mb-1 flex items-center justify-center gap-2">
               <span className="text-xs text-casino-text-secondary uppercase tracking-wider">Dealer</span>
-              {/* Show dealer score: always calculate dynamically on frontend */}
               {dealerCards.length > 0 && (
-                <span className="ml-2 text-casino-gold font-bold">
-                  ({/* During active play with hidden card, only show first visible card's value */
-                  !showDealerCards
+                <span className="font-bold text-casino-gold leading-none" style={{ fontSize: isMobile ? '1.4rem' : '2.5rem' }}>
+                  {!showDealerCards
                     ? calculateTotal([dealerCards[0]])
-                    /* When game is over or all cards revealed, show full total of all dealer cards */
-                    : calculateTotal(dealerCards) || 0})
+                    : calculateTotal(dealerCards) || 0}
                 </span>
               )}
             </div>
-            <div className="flex justify-center items-center h-24 sm:h-28">
+            <div className="flex justify-center items-center overflow-visible" style={{ height: isMobile ? '160px' : '215px' }}>
               {dealerCards.length > 0 ? (
-                <div className="flex items-center">
+                <div className="flex items-center overflow-visible">
                   {dealerCards.map((card, index) =>
                     renderCard(card, index, true, !showDealerCards && index === 1)
                   )}
@@ -518,20 +624,21 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
           </div>
 
           {/* Divider */}
-          <div className="w-full h-px bg-gradient-to-r from-transparent via-casino-gold/30 to-transparent mb-6"
-          />
+          <div className="w-full h-px bg-gradient-to-r from-transparent via-casino-gold/30 to-transparent mb-2" />
 
           {/* Player Section */}
           <div className="relative">
-            <div className="text-center mb-2">
+            <div className="text-center mb-1 flex items-center justify-center gap-2">
               <span className="text-xs text-casino-text-secondary uppercase tracking-wider">Your Hand</span>
               {playerCards.length > 0 && (
-                <span className="ml-2 text-casino-gold font-bold">({calculateTotal(playerCards)})</span>
+                <span className="font-bold text-casino-gold leading-none" style={{ fontSize: isMobile ? '1.4rem' : '2.5rem' }}>
+                  {calculateTotal(playerCards)}
+                </span>
               )}
             </div>
-            <div className="flex justify-center items-center h-24 sm:h-28">
+            <div className="flex justify-center items-center overflow-visible" style={{ height: isMobile ? '160px' : '215px' }}>
               {playerCards.length > 0 ? (
-                <div className="flex items-center">
+                <div className="flex items-center overflow-visible">
                   {playerCards.map((card, index) => renderCard(card, index, false, !cardsRevealed, true))}
                 </div>
               ) : (
@@ -562,7 +669,7 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
             initial={{ opacity: 0, y: 20, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            className={`text-center py-3 sm:py-4 px-4 sm:px-6 rounded-xl mb-3 sm:mb-6 border-2 ${
+            className={`text-center py-2 px-3 rounded-xl mb-2 border-2 ${
               result.win
                 ? 'bg-gradient-to-r from-casino-gold/20 to-casino-gold/10 border-casino-gold glow-gold-strong'
                 : result.outcome.toLowerCase().includes('push')
@@ -605,41 +712,37 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
       </AnimatePresence>
 
       {/* Bet Controls */}
-      <div className="space-y-3 sm:space-y-4">
-        <div className="glass-panel rounded-xl p-3 sm:p-4">
-          <label className="block text-xs sm:text-sm text-casino-text-secondary mb-2 sm:mb-3 text-center">
-            Bet Amount
-          </label>
-          <div className="flex items-center justify-center space-x-3 sm:space-x-4">
-            <motion.button
-              onClick={decreaseBet}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              disabled={isPlaying || bet <= minBet}
-              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-            >
-              -
-            </motion.button>
+      <div className="space-y-2">
+        <div className="glass-panel rounded-xl p-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs text-casino-text-secondary whitespace-nowrap">Bet</label>
+            <div className="flex items-center gap-2">
+              <motion.button
+                onClick={decreaseBet}
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.95 }}
+                disabled={isPlaying || bet <= minBet}
+                className="w-9 h-9 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-lg hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                -
+              </motion.button>
 
-            <div className="flex items-center space-x-2 px-4 sm:px-6 py-2 sm:py-3 bg-casino-dark rounded-xl border border-casino-gold/30 min-w-[110px] sm:min-w-[140px] justify-center">
-              <Coins className="w-4 h-4 sm:w-5 sm:h-5 text-casino-gold" />
-              <span className="text-xl sm:text-2xl font-bold text-white">{bet}</span>
+              <div className="flex items-center space-x-1.5 px-3 py-1.5 bg-casino-dark rounded-xl border border-casino-gold/30 min-w-[90px] justify-center">
+                <Coins className="w-4 h-4 text-casino-gold" />
+                <span className="text-lg font-bold text-white">{bet}</span>
+              </div>
+
+              <motion.button
+                onClick={increaseBet}
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.95 }}
+                disabled={isPlaying || bet >= maxBet || bet >= balance}
+                className="w-9 h-9 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-lg hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                +
+              </motion.button>
             </div>
-
-            <motion.button
-              onClick={increaseBet}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              disabled={isPlaying || bet >= maxBet || bet >= balance}
-              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-casino-card border border-casino-gold/30 text-casino-gold font-bold text-xl hover:border-casino-gold hover:glow-gold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-            >
-              +
-            </motion.button>
-          </div>
-
-          <div className="flex justify-between text-xs text-casino-text-muted mt-2 sm:mt-3 px-4">
-            <span>Min: {minBet}</span>
-            <span>Max: {Math.min(maxBet, balance)}</span>
+            <span className="text-xs text-casino-text-muted whitespace-nowrap">Max: {Math.min(maxBet, balance)}</span>
           </div>
         </div>
 
@@ -649,7 +752,7 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
             onClick={revealCards}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            className="w-full py-3 sm:py-5 rounded-xl font-casino font-bold text-base sm:text-xl transition-all relative overflow-hidden bg-gradient-to-r from-casino-gold to-casino-gold-dark text-casino-dark btn-premium"
+            className="w-full py-3 rounded-xl font-casino font-bold text-base sm:text-lg transition-all relative overflow-hidden bg-gradient-to-r from-casino-gold to-casino-gold-dark text-casino-dark btn-premium"
           >
             <span className="flex items-center justify-center space-x-2">
               <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -664,7 +767,7 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
             disabled={isPlaying || bet > balance}
             whileHover={!isPlaying && bet <= balance ? { scale: 1.02 } : {}}
             whileTap={!isPlaying && bet <= balance ? { scale: 0.98 } : {}}
-            className={`w-full py-3 sm:py-5 rounded-xl font-casino font-bold text-base sm:text-xl transition-all relative overflow-hidden ${
+            className={`w-full py-3 rounded-xl font-casino font-bold text-base sm:text-lg transition-all relative overflow-hidden ${
               isPlaying || bet > balance
                 ? 'bg-casino-card text-casino-text-muted cursor-not-allowed'
                 : 'bg-gradient-to-r from-casino-gold to-casino-gold-dark text-casino-dark btn-premium'
@@ -688,9 +791,9 @@ export const AceBlackjack: React.FC<AceBlackjackProps> = ({
         )}
 
         {/* Payout Info */}
-        <div className="mt-3 sm:mt-6 pt-2 sm:pt-4 border-t border-casino-gold/20">
+        <div className="pt-1.5 border-t border-casino-gold/20">
           <p className="text-xs text-casino-text-muted text-center">
-            Blackjack pays 3:2 • Win pays 1:1 • Push returns bet
+            Blackjack 3:2 • Win 1:1 • Push returns bet
           </p>
         </div>
       </div>
