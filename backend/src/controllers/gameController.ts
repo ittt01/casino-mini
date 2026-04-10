@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Game, WheelAdvancedConfig, BlackjackAdvancedConfig } from '../models/Game';
+import { Game } from '../models/Game';
 import { GameResult } from '../models/GameResult';
 import { User } from '../models/User';
 
@@ -66,7 +66,7 @@ const WHEEL_LOSE_SEGMENTS = WHEEL_SEGMENTS.filter(s => s.multiplier <= 1); // id
 // Play game - CRITICAL: Win rate logic on backend
 export const playGame = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { gameId, bet } = req.body;
+    const { gameId, bet, prediction } = req.body;
     const userId = req.user?.userId;
 
     if (!userId) {
@@ -115,43 +115,10 @@ export const playGame = async (req: Request, res: Response): Promise<void> => {
 
     if (game.slug === 'wheel') {
       // ── Lucky Wheel ──────────────────────────────────────────────────────────
-      // Use admin-configured per-segment weights when available; fall back to
-      // the simple win/lose pool derived from game.winRate.
-      const cfg = game.advancedConfig as WheelAdvancedConfig | undefined;
-      const weights = cfg?.wheelWeights;
-
-      let chosen: typeof WHEEL_SEGMENTS[0];
-
-      if (weights && typeof weights === 'object' && Object.keys(weights).length > 0) {
-        // Weighted random: each key is the segment id (as string), value is the weight.
-        const totalWeight = WHEEL_SEGMENTS.reduce(
-          (sum, seg) => sum + (weights[String(seg.id)] ?? 0),
-          0,
-        );
-
-        if (totalWeight > 0) {
-          let rand = Math.random() * totalWeight;
-          // Default to last segment in case of floating-point edge cases
-          chosen = WHEEL_SEGMENTS[WHEEL_SEGMENTS.length - 1];
-          for (const seg of WHEEL_SEGMENTS) {
-            rand -= weights[String(seg.id)] ?? 0;
-            if (rand <= 0) {
-              chosen = seg;
-              break;
-            }
-          }
-        } else {
-          // All weights are zero — fall back to pool logic
-          const isWin = Math.random() * 100 <= game.winRate;
-          const pool = isWin ? WHEEL_WIN_SEGMENTS : WHEEL_LOSE_SEGMENTS;
-          chosen = pool[Math.floor(Math.random() * pool.length)];
-        }
-      } else {
-        // No advanced config — use simple win/lose pool
-        const isWin = Math.random() * 100 <= game.winRate;
-        const pool = isWin ? WHEEL_WIN_SEGMENTS : WHEEL_LOSE_SEGMENTS;
-        chosen = pool[Math.floor(Math.random() * pool.length)];
-      }
+      // Outcome is determined solely by winRate — pick from win or lose pool.
+      const isWin = Math.random() * 100 <= game.winRate;
+      const pool = isWin ? WHEEL_WIN_SEGMENTS : WHEEL_LOSE_SEGMENTS;
+      const chosen = pool[Math.floor(Math.random() * pool.length)];
 
       winAmount = bet * chosen.multiplier;
       win = chosen.multiplier > 1;
@@ -160,38 +127,41 @@ export const playGame = async (req: Request, res: Response): Promise<void> => {
 
     } else if (game.slug === 'blackjack') {
       // ── Ace Blackjack ────────────────────────────────────────────────────────
-      // The frontend handles card logic and overrides win/winAmount in its own
-      // calculation. The backend determines the authoritative balance change and
-      // passes blackjackPays so the frontend can use the admin-configured payout.
-      const cfg = game.advancedConfig as BlackjackAdvancedConfig | undefined;
-
-      // houseEdge 0-25%; default derived from winRate for backwards compatibility
-      const houseEdge = typeof cfg?.houseEdge === 'number' ? cfg.houseEdge : (100 - game.winRate);
-      const effectiveWinRate = Math.max(0, Math.min(100, 100 - houseEdge));
-      const blackjackPays = typeof cfg?.blackjackPays === 'number' ? cfg.blackjackPays : 1.5;
-
-      const isWin = Math.random() * 100 <= effectiveWinRate;
+      // Outcome is determined solely by winRate, identical to all other games.
+      // winRate === 100 / 0 are absolute overrides (always win / always lose).
+      const isWin = game.winRate === 100
+        ? true
+        : game.winRate === 0
+        ? false
+        : Math.random() * 100 < game.winRate;
       win = isWin;
-      // Backend uses standard 2× for balance tracking; frontend may apply
-      // the actual blackjackPays multiplier for display purposes.
       winAmount = win ? bet * 2 : 0;
       outcome = win ? 'Player wins!' : 'Dealer wins';
-      // Return blackjackPays so AceBlackjack.tsx can use the configured payout
-      extraFields = { blackjackPays };
+      // guaranteedWin=true tells the frontend to rig cards so the player always wins.
+      extraFields = { guaranteedWin: game.winRate === 100 };
+
+    } else if (game.category === 'dice') {
+      // ── Diamond Dice ─────────────────────────────────────────────────────────
+      // Multiplier depends on the prediction type sent by the client:
+      //   over / under → 2×   |   exact (sum = 7) → 6×
+      const isExact = prediction?.type === 'exact';
+      const multiplier = isExact ? 6 : 2;
+      const isWin = Math.random() * 100 < game.winRate;
+      win = isWin;
+      winAmount = win ? bet * multiplier : 0;
+      outcome = win
+        ? `Rolled ${isExact ? 'exactly 7' : (prediction?.type === 'over' ? 'over 7' : 'under 7')}!`
+        : 'No match';
 
     } else {
-      // ── Generic (slots, dice, roulette) ──────────────────────────────────────
-      const isWin = Math.random() * 100 <= game.winRate;
+      // ── Generic (slots, roulette) ─────────────────────────────────────────────
+      const isWin = Math.random() * 100 < game.winRate;
       const multiplier = game.category === 'slots' ? 3 : 2;
       win = isWin;
       winAmount = win ? bet * multiplier : 0;
 
       if (game.category === 'slots') {
         outcome = win ? 'Three matching symbols!' : 'No match';
-      } else if (game.category === 'dice') {
-        outcome = win
-          ? `Rolled ${Math.floor(Math.random() * 6) + 4}`
-          : `Rolled ${Math.floor(Math.random() * 3) + 1}`;
       } else if (game.category === 'table') {
         outcome = win ? 'Ball landed on red' : 'Ball landed on black';
       } else {
@@ -263,31 +233,6 @@ export const updateWinRate = async (req: Request, res: Response): Promise<void> 
   } catch (error) {
     console.error('Update win rate error:', error);
     res.status(500).json({ message: 'Server error updating win rate' });
-  }
-};
-
-// Update win rate for all games (admin only)
-export const updateGlobalWinRate = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { winRate } = req.body;
-
-    // Validate win rate
-    if (winRate === undefined || winRate < 0 || winRate > 100) {
-      res.status(400).json({ message: 'Win rate must be between 0 and 100' });
-      return;
-    }
-
-    // Update all games with the new win rate
-    const result = await Game.updateMany({}, { winRate });
-
-    res.json({
-      message: 'Global win rate applied successfully',
-      winRate,
-      gamesUpdated: result.modifiedCount,
-    });
-  } catch (error) {
-    console.error('Update global win rate error:', error);
-    res.status(500).json({ message: 'Server error updating global win rate' });
   }
 };
 
@@ -385,71 +330,3 @@ export const seedGames = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-// Update advanced configuration for a specific game (admin only)
-export const updateAdvancedConfig = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { gameId } = req.params;
-    const { advancedConfig } = req.body;
-
-    if (!advancedConfig || typeof advancedConfig !== 'object') {
-      res.status(400).json({ message: 'advancedConfig must be a non-null object' });
-      return;
-    }
-
-    const game = await Game.findById(gameId);
-    if (!game) {
-      res.status(404).json({ message: 'Game not found' });
-      return;
-    }
-
-    // ── Per-game validation ──────────────────────────────────────────────────
-    if (game.slug === 'wheel') {
-      const cfg = advancedConfig as WheelAdvancedConfig;
-      if (!cfg.wheelWeights || typeof cfg.wheelWeights !== 'object') {
-        res.status(400).json({ message: 'wheelWeights object is required for the wheel game' });
-        return;
-      }
-      for (const [key, val] of Object.entries(cfg.wheelWeights)) {
-        if (typeof val !== 'number' || val < 0 || isNaN(val)) {
-          res.status(400).json({ message: `Weight for segment "${key}" must be a non-negative number` });
-          return;
-        }
-      }
-      const total = Object.values(cfg.wheelWeights).reduce((s, v) => s + v, 0);
-      if (total === 0) {
-        res.status(400).json({ message: 'Total wheel weight must be greater than 0' });
-        return;
-      }
-    } else if (game.slug === 'blackjack') {
-      const cfg = advancedConfig as BlackjackAdvancedConfig;
-      if (typeof cfg.houseEdge !== 'number' || cfg.houseEdge < 0 || cfg.houseEdge > 25) {
-        res.status(400).json({ message: 'houseEdge must be a number between 0 and 25' });
-        return;
-      }
-      const validPayouts = [1.0, 1.2, 1.5];
-      if (!validPayouts.includes(cfg.blackjackPays)) {
-        res.status(400).json({ message: 'blackjackPays must be 1.0, 1.2, or 1.5' });
-        return;
-      }
-    }
-    // ────────────────────────────────────────────────────────────────────────
-
-    game.advancedConfig = advancedConfig;
-    // Required for Mongoose Mixed fields — marks the field as dirty for saving
-    game.markModified('advancedConfig');
-    await game.save();
-
-    res.json({
-      message: 'Advanced configuration updated successfully',
-      game: {
-        id: game._id,
-        name: game.name,
-        slug: game.slug,
-        advancedConfig: game.advancedConfig,
-      },
-    });
-  } catch (error) {
-    console.error('Update advanced config error:', error);
-    res.status(500).json({ message: 'Server error updating configuration' });
-  }
-};

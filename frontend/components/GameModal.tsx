@@ -46,6 +46,7 @@ interface GameResult {
   dealerTotal?: number;
   segment?: number;
   multiplier?: number;
+  guaranteedWin?: boolean;
 }
 
 // Win celebration component

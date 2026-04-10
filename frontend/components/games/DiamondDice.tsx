@@ -23,9 +23,9 @@ interface DiamondDiceProps {
 
 // Prediction options for dice sum
 const PREDICTION_OPTIONS = [
-  { type: 'over', value: 7, label: 'Over 7', payout: '2x' },
-  { type: 'under', value: 7, label: 'Under 7', payout: '2x' },
-  { type: 'exact', value: 7, label: 'Exactly 7', payout: '6x' },
+  { type: 'over',  value: 7, label: 'Over 7',    payout: '2x', multiplier: 2 },
+  { type: 'under', value: 7, label: 'Under 7',   payout: '2x', multiplier: 2 },
+  { type: 'exact', value: 7, label: 'Exactly 7', payout: '6x', multiplier: 6 },
 ];
 
 // Dot positions for each dice face using 3x3 grid cell indices (0-8)
@@ -198,9 +198,15 @@ export const DiamondDice: React.FC<DiamondDiceProps> = ({
       playSuspense();
       await new Promise((resolve) => setTimeout(resolve, 800));
 
+      // Apply the correct multiplier for this prediction type.
+      // The backend may use a generic 2× fallback; the frontend is authoritative
+      // for the displayed amount since it knows which prediction was selected.
+      const correctWinAmount = gameResult.win ? bet * selectedPrediction.multiplier : 0;
+
       // Create a synchronized result object with the ACTUAL dice values displayed
       const synchronizedResult: GameResult = {
         ...gameResult,
+        winAmount: correctWinAmount,
         dice: safeDice,
         sum: safeDice[0] + safeDice[1],
       };
@@ -211,7 +217,7 @@ export const DiamondDice: React.FC<DiamondDiceProps> = ({
       if (gameResult.win) {
         setShowWinEffect(true);
         setConfetti(true);
-        playWin(gameResult.winAmount, bet);
+        playWin(correctWinAmount, bet);
         setTimeout(() => setConfetti(false), 5000);
       } else {
         setShowLoseEffect(true);

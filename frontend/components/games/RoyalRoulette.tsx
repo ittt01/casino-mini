@@ -241,16 +241,17 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
       // -----------------------------------------------------------------------
 
       // --- Ball rotation (lands on the winning slot) -------------------------
-      // In the wheel's natural orientation each slot's centre sits at:
-      //   index × SLICE_ANGLE + SLICE_ANGLE/2  (clockwise from 12 o'clock)
-      // The ball counter-rotates and must end at exactly that screen angle.
+      // Each slot div is rendered with transform: rotate(index * SLICE_ANGLE),
+      // so its wedge triangle is CENTRED at exactly  index × SLICE_ANGLE
+      // degrees clockwise from 12 o'clock.
+      // The ball must end up at that same angle.
       //
       // Strategy: compute how many degrees counter-clockwise the ball must
       // travel from its current visual position to reach the target, then add
       // extra full counter-clockwise spins. This guarantees the ball always
       // moves in the same direction (never snaps backward).
       const winningIndex = ROULETTE_NUMBERS.findIndex(n => n.number === generatedWin.number);
-      const targetBallAngle = winningIndex * SLICE_ANGLE + SLICE_ANGLE / 2; // 0–360°
+      const targetBallAngle = winningIndex * SLICE_ANGLE; // slot centre = index × SLICE_ANGLE
 
       const currentBallAngle = ((currentBallRef.current % 360) + 360) % 360;
       // Counter-clockwise delta: how far CCW from currentBallAngle to targetBallAngle
@@ -336,7 +337,7 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
       {renderConfetti()}
 
       {/* Game Header */}
-      <div className="text-center mb-3 sm:mb-6">
+      <div className="text-center mb-2">
         <h2 className="text-2xl sm:text-3xl font-casino font-bold text-gold-gradient mb-1 sm:mb-2">
           Royal Roulette
         </h2>
@@ -346,8 +347,8 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
       </div>
 
       {/* Roulette Wheel */}
-      <div className="relative mb-4 sm:mb-8 flex justify-center">
-        <div className="relative w-[280px] h-[280px] sm:w-80 sm:h-80">
+      <div className="relative mb-3 flex justify-center">
+        <div className="relative" style={{ width: 'min(380px, 92%)', height: 'min(380px, 92vw)' }}>
           {/* Outer ring */}
           <div className="absolute inset-0 rounded-full border-4 border-casino-gold/50 shadow-2xl glow-gold"
             style={{ background: 'conic-gradient(from 0deg, #1a1a1a, #2a2a2a, #1a1a1a)' }}
@@ -377,7 +378,7 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
                 >
                   {/* Slot wedge background */}
                   <div
-                    className={`absolute top-0 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[18px] border-r-[18px] border-t-[138px] ${
+                    className={`absolute top-0 left-1/2 -translate-x-1/2 w-0 h-0 ${
                       slot.color === 'green'
                         ? 'border-t-green-600'
                         : slot.color === 'red'
@@ -385,6 +386,10 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
                         : 'border-t-gray-800'
                     } ${isHighlighted ? 'brightness-150' : ''}`}
                     style={{
+                      borderLeft: '18px solid transparent',
+                      borderRight: '18px solid transparent',
+                      borderTopWidth: '188px',
+                      borderTopStyle: 'solid',
                       transformOrigin: 'center bottom',
                       clipPath: 'polygon(50% 100%, 0% 0%, 100% 0%)',
                     }}
@@ -392,16 +397,24 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
 
                   {/* Number text - rotated to be readable */}
                   <div
-                    className={`absolute top-2 left-1/2 -translate-x-1/2 text-xs font-bold ${
-                      slot.color === 'green'
-                        ? 'text-white'
-                        : 'text-white'
-                    } ${isHighlighted ? 'slot-highlight' : ''}`}
+                    className={isHighlighted ? 'slot-highlight' : ''}
                     style={{
+                      position: 'absolute',
+                      top: '6px',
+                      left: '50%',
+                      transform: `translateX(-50%) rotate(${degreesPerSlot / 2}deg)`,
                       transformOrigin: 'center center',
-                      transform: `rotate(${degreesPerSlot / 2}deg)`,
-                      textShadow: '0 1px 2px rgba(0,0,0,0.8)',
-                      marginTop: '8px',
+                      zIndex: 10,
+                      fontSize: '13px',
+                      fontWeight: 900,
+                      lineHeight: 1,
+                      color: '#ffffff',
+                      whiteSpace: 'nowrap',
+                      padding: '2px 4px',
+                      borderRadius: '3px',
+                      backgroundColor: 'rgba(0,0,0,0.45)',
+                      textShadow: '0 0 4px rgba(0,0,0,1), 0 1px 0 rgba(0,0,0,1)',
+                      letterSpacing: '-0.3px',
                     }}
                   >
                     {slot.number}
@@ -412,9 +425,10 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
 
             {/* Center hub */}
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-casino-gold to-casino-gold-dark border-4 border-casino-card shadow-lg flex items-center justify-center"
+              <div className="rounded-full bg-gradient-to-br from-casino-gold to-casino-gold-dark border-4 border-casino-card shadow-lg flex items-center justify-center"
+                style={{ width: '96px', height: '96px' }}
               >
-                <span className="text-casino-dark font-bold text-lg">★</span>
+                <span className="text-casino-dark font-bold text-2xl">★</span>
               </div>
             </div>
           </motion.div>
@@ -428,9 +442,12 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
             }}
           >
             <div
-              className="absolute top-10 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-white shadow-lg"
+              className="absolute left-1/2 -translate-x-1/2 rounded-full bg-white shadow-lg"
               style={{
-                boxShadow: '0 0 10px rgba(255,255,255,0.8)',
+                top: '14px',
+                width: '18px',
+                height: '18px',
+                boxShadow: '0 0 12px rgba(255,255,255,0.9)',
               }}
             />
           </motion.div>
@@ -439,7 +456,7 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
       </div>
 
       {/* Prediction Selection */}
-      <div className="glass-panel rounded-xl p-3 sm:p-4 mb-3 sm:mb-6">
+      <div className="glass-panel rounded-xl p-3 mb-3">
         <p className="text-xs sm:text-sm text-casino-text-secondary text-center mb-2 sm:mb-3">Bet on:</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {PREDICTION_OPTIONS.map((option) => (
@@ -471,7 +488,7 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
             initial={{ opacity: 0, y: 20, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            className={`text-center py-3 sm:py-4 px-4 sm:px-6 rounded-xl mb-3 sm:mb-6 border-2 ${
+            className={`text-center py-3 px-4 rounded-xl mb-3 border-2 ${
               result.win
                 ? 'bg-gradient-to-r from-casino-gold/20 to-casino-gold/10 border-casino-gold glow-gold-strong'
                 : 'bg-red-900/20 border-red-500/50'
@@ -495,16 +512,31 @@ export const RoyalRoulette: React.FC<RoyalRouletteProps> = ({
               )}
             </motion.div>
 
-            <div className="mt-2 flex items-center justify-center space-x-4">
-              <span className="text-sm text-casino-text-secondary">Winning number:</span>
+            <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '0.65rem', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#9ca3af', fontWeight: 600 }}>
+                Winning Number
+              </span>
               <span
-                className={`text-xl font-bold px-3 py-1 rounded ${
-                  result.winningColor === 'green'
-                    ? 'bg-green-600'
-                    : result.winningColor === 'red'
-                    ? 'bg-red-600'
-                    : 'bg-gray-800'
-                }`}
+                style={{
+                  fontSize: '7rem',
+                  fontWeight: 900,
+                  lineHeight: 1,
+                  padding: '10px 36px',
+                  borderRadius: '16px',
+                  color: '#fde047',
+                  background:
+                    result.winningColor === 'green'
+                      ? '#15803d'
+                      : result.winningColor === 'red'
+                      ? '#b91c1c'
+                      : '#111827',
+                  border: '3px solid #fde047',
+                  boxShadow: '0 0 24px rgba(253,224,71,0.55), inset 0 0 12px rgba(0,0,0,0.4)',
+                  textShadow: '0 0 16px rgba(253,224,71,0.8), 0 2px 4px rgba(0,0,0,0.9)',
+                  minWidth: '120px',
+                  textAlign: 'center',
+                  display: 'block',
+                }}
               >
                 {result.winningNumber}
               </span>
